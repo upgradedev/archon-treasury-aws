@@ -1,0 +1,6 @@
+__pycache__/
+tests/
+scripts/
+infra/
+.github/
+temp/

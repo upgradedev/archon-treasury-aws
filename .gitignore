@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+temp/
+.venv/
+node_modules/
+AGENTS.md
+STATE.md
+LOG.md
+TRAPS.md
+CLAUDE.md
+GEMINI.md
+.threefold/

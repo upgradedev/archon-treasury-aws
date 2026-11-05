@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kerdon"
+version = "0.1.0"
+description = "Archon Treasury deterministic treasury core. Pure domain, integer cents."
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+# Optional: only the deployed Evaluator needs these. The core, adapters,
+# demo, tests, and CI gates never install them.
+[project.optional-dependencies]
+aws = ["boto3>=1.34", "strands-agents>=0.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
