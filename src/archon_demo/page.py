@@ -1,207 +1,514 @@
-"""The single judge page. Landmarks, native controls, visible reasons.
+"""Enterprise Treasury Cockpit HTML for the anonymous judge surface.
 
-Design constraints honored: plain hierarchy, system serif headings with a
-system sans body, deep teal accent, no gradients, no animation, focus
-outlines always visible, works at 375px and 1280px, results announced in
-an aria-live region, and every blocked action explains itself in text.
+Built for zero-install delivery from AWS Lambda Function URL and local HTTP:
+- Semantic landmarks (<header>, <main>, <footer>), skip link, single <h1>
+- WCAG AAA high-contrast tokens and aria-live="polite" status region
+- Responsive 2-column cockpit at 1280px, 1-column stack at 375px (0 overflow)
+- Complete Kit 1 (Adaptive Treasury Controller), Kit 3 (Payment Ops Incident
+  Commander), and Kit 11 (Metal x402 Business Agents) interactive controls.
 """
 
-PAGE = """<!doctype html>
+from archon_demo.ui_script import UI_SCRIPT
+
+PAGE = (
+    """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Archon Treasury, payout approval demo</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230f5f5c'/%3E%3Ctext x='8' y='12' font-size='10' text-anchor='middle' fill='white'%3EA%3C/text%3E%3C/svg%3E">
+<title>Archon Treasury (powered by Kerdon) | Autonomous Treasury OS</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230f172a'/><text x='8' y='23' font-family='sans-serif' font-size='20' font-weight='bold' fill='%2338bdf8'>A</text></svg>">
 <style>
-  :root { --ink:#17201d; --accent:#0f5f5c; --line:#c9d4d0; --bad:#8c2b1d; }
-  * { box-sizing:border-box; }
-  html { max-width:100vw; }
-  body { margin:0; color:var(--ink); background:#ffffff; overflow-x:hidden;
-         font-family:-apple-system,"Segoe UI",Helvetica,sans-serif; line-height:1.5; }
-  header, main, footer { max-width:980px; width:100%; margin:0 auto; padding:20px 16px; }
-  h1,h2 { font-family:Georgia,"Times New Roman",serif; line-height:1.2; }
-  h1 { font-size:2rem; margin:0 0 8px; } h2 { font-size:1.3rem; margin:28px 0 8px; }
-  .lede { font-size:1.1rem; max-width:46rem; }
-  .mode { border:1px solid var(--line); padding:10px 12px; background:#f2f6f4; }
-  .skip { position:absolute; left:-9999px; top:0; background:#ffffff; padding:10px 14px; z-index:2; }
-  .skip:focus-visible { left:8px; }
-  .scroll-x { overflow-x:auto; max-width:100%; }
-  table { border-collapse:collapse; width:100%; }
-  th,td { border-bottom:1px solid var(--line); padding:8px 6px; text-align:left; vertical-align:top; }
-  th { font-size:.85rem; text-transform:uppercase; letter-spacing:.04em; }
-  button { font:inherit; padding:8px 14px; margin:2px 4px 2px 0; cursor:pointer;
-           border:2px solid var(--accent); background:#ffffff; color:var(--accent); border-radius:4px; }
-  button.primary { background:var(--accent); color:#ffffff; }
-  a.cta { display:inline-block; padding:10px 16px; border:2px solid var(--accent);
-          background:var(--accent); color:#ffffff; border-radius:4px; text-decoration:none; font-weight:700; }
-  button:focus-visible, a:focus-visible, summary:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
-  .state-VALID { color:var(--accent); font-weight:700; }
-  .state-INVALIDATED, .err { color:var(--bad); font-weight:700; }
-  .reason { display:block; font-size:.9rem; }
-  #status { min-height:1.6em; border:1px solid var(--line); padding:10px 12px; background:#f2f6f4; }
-  form.deposit { display:flex; flex-wrap:wrap; gap:8px; align-items:end; }
-  label { display:block; font-size:.9rem; font-weight:600; }
-  input,select { font:inherit; padding:8px; border:1px solid var(--line); border-radius:4px; }
-  pre { white-space:pre-wrap; word-break:break-all; background:#f2f6f4; padding:10px; }
-  code { word-break:break-all; }
-  @media (max-width:640px) {
-    h1 { font-size:1.6rem; }
-    th,td { padding:6px 4px; font-size:.85rem; word-break:break-word; }
-    button { padding:6px 8px; }
+  :root {
+    color-scheme: light;
+    --bg: #f1f5f9;
+    --surface: #ffffff;
+    --navy: #0f172a;
+    --navy-sub: #1e293b;
+    --fg: #0f172a;
+    --muted: #334155;
+    --border: #cbd5e1;
+    --accent: #1d4ed8;
+    --accent-hover: #1e40af;
+    --ok-bg: #ecfdf5;
+    --ok-fg: #065f46;
+    --ok-bd: #6ee7b7;
+    --err-bg: #fef2f2;
+    --err-fg: #991b1b;
+    --err-bd: #fca5a5;
+    --amber-bg: #fffbeb;
+    --amber-fg: #92400e;
+    --amber-bd: #fcd34d;
+    --indigo-bg: #eef2ff;
+    --indigo-fg: #1e40af;
+    --indigo-bd: #a5b4fc;
   }
-  @media (prefers-reduced-motion: reduce) { * { transition:none; animation:none; } }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+    overflow-x: hidden;
+  }
+  .skip {
+    position: absolute; left: 0.5rem; top: -10rem;
+    background: #ffffff; color: var(--fg); padding: 0.5rem 0.85rem;
+    border: 2px solid var(--accent); border-radius: 6px; z-index: 100;
+  }
+  .skip:focus { top: 0.5rem; }
+  header {
+    background: var(--navy);
+    color: #f8fafc;
+    padding: 1.25rem 1.25rem 1rem;
+    border-bottom: 1px solid #334155;
+  }
+  .header-inner {
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  .brand-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  h1 {
+    font-size: 1.45rem;
+    margin: 0;
+    letter-spacing: -0.01em;
+    color: #ffffff;
+  }
+  .telemetry-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+  .tel-pill {
+    background: var(--navy-sub);
+    color: #e2e8f0;
+    border: 1px solid #475569;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+  .lede {
+    margin: 0.55rem 0 0.75rem;
+    color: #e2e8f0;
+    max-width: 920px;
+    font-size: 0.96rem;
+  }
+  .quick-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--navy-sub);
+    border: 1px solid #475569;
+    border-radius: 8px;
+    padding: 0.55rem 0.75rem;
+  }
+  .quick-bar span {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #f8fafc;
+  }
+  .cta {
+    display: inline-block;
+    background: #38bdf8;
+    color: #0f172a;
+    text-decoration: none;
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 0.84rem;
+  }
+  main {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 1rem 1.25rem 2rem;
+  }
+  .status-banner {
+    padding: 0.7rem 0.95rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    font-weight: 600;
+    border: 1px solid var(--ok-bd);
+    background: var(--ok-bg);
+    color: var(--ok-fg);
+  }
+  .status-banner.err {
+    border-color: var(--err-bd);
+    background: var(--err-bg);
+    color: var(--err-fg);
+  }
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.85rem;
+    margin-bottom: 1rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.95rem 1.1rem;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.3rem;
+  }
+  .acct-tag {
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+  }
+  .mono-sm {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .big-num {
+    font-size: 1.22rem;
+    font-weight: 700;
+    margin-bottom: 0.45rem;
+  }
+  .meter-bar {
+    height: 8px;
+    background: #e2e8f0;
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 0.45rem;
+  }
+  .meter-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+  }
+  .card-foot {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  .forecast-panel {
+    margin-bottom: 1rem;
+  }
+  .forecast-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .cockpit-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
+    gap: 1rem;
+    align-items: start;
+  }
+  @media (max-width: 980px) {
+    .cockpit-grid { grid-template-columns: 1fr; }
+  }
+  section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    margin-bottom: 1rem;
+  }
+  h2 {
+    font-size: 1.05rem;
+    margin: 0 0 0.65rem;
+    color: var(--fg);
+  }
+  .scroll-x {
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.6rem 0.5rem;
+    border-bottom: 1px solid #e2e8f0;
+    vertical-align: top;
+  }
+  th {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+    background: #f8fafc;
+  }
+  .sup-title { font-weight: 700; color: var(--fg); }
+  .sup-sub { font-size: 0.8rem; color: var(--muted); margin-top: 0.18rem; }
+  .amt-main { font-weight: 700; white-space: nowrap; }
+  .rail-pill {
+    display: inline-block;
+    background: #e2e8f0;
+    color: var(--fg);
+    padding: 0.05rem 0.4rem;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 0.72rem;
+  }
+  .badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .badge-ok { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bd); }
+  .badge-err { background: var(--err-bg); color: var(--err-fg); border-color: var(--err-bd); }
+  .badge-amber { background: var(--amber-bg); color: var(--amber-fg); border-color: var(--amber-bd); }
+  .badge-indigo { background: var(--indigo-bg); color: var(--indigo-fg); border-color: var(--indigo-bd); }
+  .badge-neutral { background: #f1f5f9; color: var(--muted); border-color: var(--border); }
+  button, select, input {
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.4rem 0.7rem;
+    border: 1px solid #64748b;
+    border-radius: 6px;
+    background: #ffffff;
+    color: var(--fg);
+  }
+  button {
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button:hover { background: #f1f5f9; }
+  button.primary {
+    background: var(--accent);
+    color: #ffffff;
+    border-color: var(--accent);
+  }
+  button.primary:hover { background: var(--accent-hover); }
+  button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .btn-col { display: flex; flex-direction: column; gap: 0.35rem; }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .deposit {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: end;
+  }
+  label {
+    display: block;
+    font-weight: 600;
+    font-size: 0.82rem;
+    margin-bottom: 0.2rem;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.82em;
+    background: #f1f5f9;
+    padding: 0.1rem 0.3rem;
+    border-radius: 4px;
+    word-break: break-all;
+  }
+  .receipt-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 0.65rem;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem;
+  }
+  .full-span { grid-column: 1 / -1; }
+  .kv-label { font-size: 0.76rem; font-weight: 700; color: var(--muted); text-transform: uppercase; }
+  .kv-val { font-size: 0.88rem; margin-top: 0.15rem; }
+  .kv-grid { display: grid; gap: 0.35rem; font-size: 0.88rem; margin-bottom: 0.65rem; }
+  .finding-item { margin-bottom: 0.45rem; font-size: 0.88rem; }
+  .sub-card {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.65rem 0.8rem;
+    margin-top: 0.6rem;
+    font-size: 0.85rem;
+  }
+  .code-preview {
+    background: #0f172a;
+    color: #f8fafc;
+    padding: 0.55rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    overflow-x: auto;
+    margin: 0.45rem 0 0;
+  }
+  .compact-list { margin: 0.4rem 0 0; padding-left: 1.2rem; }
+  .muted-note { color: var(--muted); font-size: 0.85rem; margin: 0; }
+  footer {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 0 1.25rem 2rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
 </style>
 </head>
 <body>
-<a class="skip" href="#main">Skip to the demo</a>
+<a class="skip" href="#main">Skip to main content</a>
 <header>
-  <h1>Archon Treasury</h1>
-  <p class="lede">Archon Treasury recalculates Airwallex FX and supplier payouts when a
-  deposit lands, invalidating stale approvals so cross-border teams never breach
-  their cash reserve floor.</p>
-  <p>For Elena Vance, Finance and Operations Manager at a 14-person cross-border
-  hardware studio. Five supplier payouts, three currencies, 72 hours.</p>
-  <p class="mode" role="note">Anonymous demo with synthetic data on a fake Airwallex
-  transport. No live money moves. Live sandbox wiring follows sandbox approval.
-  Your demo state is yours alone: each visitor gets a private session that
-  resets often. The rules, digests, and receipts below are the real
-  deterministic core. Measured in the repo: 74 of 74 frozen benchmark cases
-  for this engine, 24 of 74 for a naive one-pass matcher, and 28 of 62 for a
-  hosted Claude model alone on the rule cases. Reproduce with
-  <code>python scripts/run_benchmark.py</code>.</p>
-  <p><a class="cta" href="#obl-h">Start the 60-second story</a></p>
+  <div class="header-inner">
+    <div class="brand-row">
+      <h1>Archon Treasury (powered by Kerdon)</h1>
+      <div class="telemetry-strip">
+        <span class="tel-pill">Vance Hardware Studio Ltd. (72h Close)</span>
+        <span class="tel-pill">Engine: 74/74 (2ms) vs LLM: 28/62</span>
+        <span class="tel-pill">21 Completeness Rules</span>
+        <span class="tel-pill">Metal *USDZ x402</span>
+      </div>
+    </div>
+    <p class="lede">Archon Treasury recalculates Airwallex FX and supplier payouts when a deposit lands, invalidating stale approvals so cross-border teams never breach their cash reserve floor.</p>
+    <div class="quick-bar">
+      <span>Guided 60s Judge Flow:</span>
+      <a class="cta" href="#obl-h">1. Approve USD &amp; EUR Payouts</a>
+      <button type="button" data-act="quick-eur-deposit">2. Land EUR 500.00 Webhook</button>
+      <button type="button" data-act="quick-usd-deposit">3. Land USD 200.00 Floor Recovery</button>
+      <button type="button" data-act="ai-match">4. Run Evaluator on Invoice</button>
+      <button type="button" data-act="metal-dispute">5. Resolve x402 Dispute Batch</button>
+    </div>
+  </div>
 </header>
 <main id="main">
-  <section aria-labelledby="try-h">
-    <h2 id="try-h">Try the 60-second story</h2>
-    <ol>
-      <li>Approve two payouts, one in USD and one in EUR.</li>
-      <li>Land a EUR deposit with the form below. Only the EUR approval falls.</li>
-      <li>Execute the USD payout. Then try the stale EUR one and read why it refuses.</li>
-    </ol>
-    <div id="status" role="status" aria-live="polite">Loading balances.</div>
+  <div id="status" class="status-banner" role="status" aria-live="polite">Ready. Approve a USD payout and a EUR payout, then land a EUR 500.00 deposit to watch selective invalidation.</div>
+
+  <section aria-labelledby="bal-h" style="background:transparent;border:0;padding:0;margin-bottom:0.5rem">
+    <h2 id="bal-h" style="margin-bottom:0.5rem">Multi-Currency Liquidity &amp; Reserve Floors</h2>
+    <div class="kpi-grid" id="balances"></div>
   </section>
-  <section aria-labelledby="bal-h">
-    <h2 id="bal-h">Balances and reserve floors</h2>
-    <div class="scroll-x" role="region" aria-label="Balances table, scrollable" tabindex="0">
-    <table><thead><tr><th>Account</th><th>Balance</th><th>Reserve floor</th></tr></thead>
-    <tbody id="balances"></tbody></table></div>
+
+  <section class="forecast-panel" aria-labelledby="fc-h">
+    <h2 id="fc-h">Kit 1: Receipt Forecast Confidence &amp; Autonomous FX Conversion Limit</h2>
+    <div id="forecast-box"></div>
   </section>
-  <section aria-labelledby="obl-h">
-    <h2 id="obl-h">Supplier payouts</h2>
-    <div class="scroll-x" role="region" aria-label="Supplier payouts table, scrollable" tabindex="0">
-    <table><thead><tr><th>Payout</th><th>Amount</th><th>Approval</th><th>Actions</th></tr></thead>
-    <tbody id="obligations"></tbody></table></div>
-  </section>
-  <section aria-labelledby="dep-h">
-    <h2 id="dep-h">Simulate an incoming deposit</h2>
-    <form class="deposit" id="deposit-form">
-      <div><label for="currency">Currency</label>
-        <select id="currency"><option>EUR</option><option>USD</option><option>GBP</option></select></div>
-      <div><label for="amount">Amount, major units</label>
-        <input id="amount" inputmode="decimal" value="500.00" required></div>
-      <button class="primary" type="submit">Land deposit</button>
-      <button type="button" id="reset">Reset demo</button>
-    </form>
-  </section>
-  <section aria-labelledby="find-h">
-    <h2 id="find-h">Completeness findings, 21 deterministic rules</h2>
-    <ul id="findings"></ul>
-  </section>
-  <section aria-labelledby="metal-h">
-    <h2 id="metal-h">Metal x402 USDZ sub-agent spend governor</h2>
-    <p>Three sub-agents share a fixed USDZ 100.00 (10000 cents) budget by weight. When a per-call price rises, only that sub-agent's call cap shrinks.</p>
-    <div class="scroll-x" role="region" aria-label="Metal USDZ budgets table, scrollable" tabindex="0">
-    <table><thead><tr><th>Sub-agent</th><th>Allowance</th><th>Price per call</th><th>Calls used / cap</th><th>Actions</th></tr></thead>
-    <tbody id="metal-agents"></tbody></table></div>
-  </section>
-  <section aria-labelledby="wire-h">
-    <h2 id="wire-h">Live wiring map, coded and waiting for sandbox keys</h2>
-    <ul>
-      <li>Balances and quotes: <code>GET /api/v1/balances</code>, <code>POST /api/v1/fx/quotes/create</code> (coded, not connected).</li>
-      <li>Payouts: <code>POST /api/v1/transfers/create</code> with a derived request_id, only through the Writer gate (coded, not connected).</li>
-      <li>Trigger: signed deposit webhooks, HMAC verified, plus <code>POST /api/v1/simulation/deposit/create</code> for sandbox funding (coded, not connected).</li>
-      <li>Evaluator: Claude on Amazon Bedrock extracts invoice fields; deterministic code still decides. Verified live from the repo, kept off this public page so anonymous clicks cannot spend model tokens.</li>
-    </ul>
-  </section>
+
+  <div class="cockpit-grid">
+    <div>
+      <section aria-labelledby="obl-h">
+        <h2 id="obl-h">Supplier Payouts &amp; Adaptive Triage Plan (72-Hour Window)</h2>
+        <div class="scroll-x" role="region" aria-label="Supplier payouts table, scrollable" tabindex="0">
+          <table>
+            <thead>
+              <tr>
+                <th>Supplier &amp; Invoice</th>
+                <th>Amount &amp; Rail</th>
+                <th>Agent Triage Plan</th>
+                <th>Approval &amp; Gate Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="obligations"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section aria-labelledby="rec-h">
+        <h2 id="rec-h">Cryptographic Merkle Receipt &amp; Refreshable Braille Inspector</h2>
+        <div id="receipt-drawer"></div>
+      </section>
+
+      <section aria-labelledby="metal-h">
+        <h2 id="metal-h">Kit 11: Metal x402 USDZ Sub-Agent Spend Governor &amp; Mandate Desk</h2>
+        <p class="muted-note" style="margin-bottom:0.6rem">Three sub-agents share a fixed USDZ 100.00 (10000 cents) budget by weight with per-purchase mandate caps. Spike a price or verify a disputed batch of signed customer orders.</p>
+        <div class="scroll-x" role="region" aria-label="Metal USDZ budgets table, scrollable" tabindex="0">
+          <table>
+            <thead>
+              <tr>
+                <th>Sub-Agent</th>
+                <th>Allowance</th>
+                <th>Price &amp; Mandate Cap</th>
+                <th>Calls Used / Cap</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="metal-agents"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:0.75rem" class="btn-row">
+          <button type="button" class="primary" data-act="metal-dispute">Verify Signed x402 Disputed Order Batch &amp; Refund Faulty Feed</button>
+        </div>
+        <div id="dispute-box"></div>
+      </section>
+    </div>
+
+    <div>
+      <section aria-labelledby="dep-h">
+        <h2 id="dep-h">Simulate Signed Airwallex Deposit Webhook</h2>
+        <form class="deposit" id="deposit-form">
+          <div>
+            <label for="currency">Currency</label>
+            <select id="currency"><option>EUR</option><option>USD</option><option>GBP</option></select>
+          </div>
+          <div>
+            <label for="amount">Amount, major units</label>
+            <input id="amount" inputmode="decimal" value="500.00" required>
+          </div>
+          <button class="primary" type="submit">Land deposit</button>
+          <button type="button" id="reset">Reset demo</button>
+        </form>
+      </section>
+
+      <section aria-labelledby="find-h">
+        <h2 id="find-h">Completeness Findings (21 Deterministic Rules)</h2>
+        <ul id="findings" class="compact-list"></ul>
+      </section>
+
+      <section aria-labelledby="ai-h">
+        <h2 id="ai-h">Evaluator Port: Unstructured Invoice Verification</h2>
+        <p class="muted-note" style="margin-bottom:0.55rem">Extracts invoice fields (Claude Haiku on Amazon Bedrock when live, deterministic stand-in offline) and compares against obligation terms in integer cents.</p>
+        <div class="btn-row">
+          <button type="button" class="primary" data-act="ai-match">Inspect Valid Invoice (USD 450.00)</button>
+          <button type="button" data-act="ai-tamper">Inspect Tampered Invoice (USD 495.00)</button>
+        </div>
+        <div id="ai-box"></div>
+      </section>
+
+      <section aria-labelledby="inc-h">
+        <h2 id="inc-h">Kit 3: Payment Ops Incident Commander</h2>
+        <p class="muted-note" style="margin-bottom:0.55rem">Handles a delayed SWIFT supplier wire: transitions SENT to CANCELLED (bank_return) and issues a replacement under a 7-day duplicate lock with two SWIFT fees budgeted.</p>
+        <div id="incident-box"></div>
+        <div class="btn-row">
+          <button type="button" data-act="inc-fail">1. Simulate Bank Return (CANCELLED)</button>
+          <button type="button" class="primary" data-act="inc-resolve">2. Issue Replacement Transfer</button>
+        </div>
+      </section>
+
+      <section aria-labelledby="wire-h">
+        <h2 id="wire-h">Airwallex &amp; AWS Architecture Boundary</h2>
+        <ul class="compact-list" style="font-size:0.84rem;color:var(--muted)">
+          <li><strong>Balances &amp; FX:</strong> <code>GET /api/v1/balances/current</code>, <code>POST /api/v1/fx/quotes/create</code>, <code>POST /api/v1/fx/conversions/create</code> (flat EUR 12.85 SWIFT fee vs 0.00 LOCAL).</li>
+          <li><strong>Writer Gate:</strong> <code>POST /api/v1/transfers/create</code> with derived <code>uuid5</code> request_id and 7-day idempotency lock.</li>
+          <li><strong>Webhooks &amp; Simulation:</strong> HMAC-SHA256 verified deposit and transfer transition webhooks (synthetic transport active until O-2 sandbox keys connect).</li>
+        </ul>
+      </section>
+    </div>
+  </div>
 </main>
-<footer><p>Amounts speak in major units with cents beside them, so the number you hear
-is the number the bank boundary receives.</p></footer>
-<script>
-const statusBox = document.getElementById('status');
-function say(text, isError) {
-  statusBox.textContent = text; statusBox.className = isError ? 'err' : '';
-}
-async function call(path, body) {
-  const res = await fetch(path, {method: body ? 'POST' : 'GET',
-    headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined});
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
-  return data;
-}
-function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-async function render() {
-  const s = await call('/api/state');
-  document.getElementById('balances').innerHTML = s.balances.map(b =>
-    `<tr><td>${esc(b.account_id)}</td><td>${esc(b.amount)}</td><td>${esc(b.reserve_floor)}</td></tr>`).join('');
-  document.getElementById('obligations').innerHTML = s.obligations.map(o => `
-    <tr><td>${esc(o.obligation_id)} to ${esc(o.counterparty_id)}</td><td>${esc(o.amount)}</td>
-    <td><span class="state-${esc(o.approval_state)}">${esc(o.approval_state)}</span>
-      <span class="reason">${esc(o.action_reason)}</span>
-      ${o.receipt ? `<details><summary>Spoken receipt, Merkle sealed</summary>
-        <p aria-label="${esc(o.receipt.spoken_text)}">${esc(o.receipt.spoken_text)}</p>
-        <pre>${esc(o.receipt.braille_transcript)}</pre>
-        <p>Root ${esc(o.receipt.merkle_root_sha256)} verified: ${o.receipt.merkle_verified}</p></details>` : ''}
-    </td>
-    <td><button data-act="approve" data-id="${esc(o.obligation_id)}">Approve</button>
-        <button class="primary" data-act="execute" data-id="${esc(o.obligation_id)}" data-sha="${esc(o.approval_sha256 || '')}">Execute</button></td></tr>`).join('');
-  document.getElementById('findings').innerHTML = s.findings.length
-    ? s.findings.map(f => `<li>${esc(f.rule_id)} ${esc(f.message)}</li>`).join('')
-    : '<li>No blockers on current evidence.</li>';
-  document.getElementById('metal-agents').innerHTML = (s.metal_agents || []).map(m => `
-    <tr><td>${esc(m.agent_id)} (${esc(m.weight_percent)}%)</td><td>${esc(m.allowance)}</td><td>${esc(m.price_per_call)}</td>
-    <td>${esc(m.calls_used)} / ${esc(m.call_cap)} (spent ${esc(m.spent)})</td>
-    <td><button data-metal-call="${esc(m.agent_id)}">Pay 1 call</button>
-        <button data-metal-spike="${esc(m.agent_id)}">Spike to 0.50</button></td></tr>`).join('');
-  document.querySelectorAll('button[data-act]').forEach(btn => btn.onclick = async () => {
-    say('Working. One moment.');
-    try {
-      const payload = (btn.dataset.act === 'execute' && btn.dataset.sha) ? {approval_sha256: btn.dataset.sha} : {};
-      const r = await call(`/api/${btn.dataset.act}/${btn.dataset.id}`, payload);
-      if (btn.dataset.act === 'approve') say(`Approved ${r.obligation_id}. Its spoken receipt is sealed in the table.`);
-      else say(`Paid ${r.obligation_id}. Transfer ${r.transfer_id} sent.`);
-    } catch (e) { say(`Refused: ${e.message}`, true); }
-    await render();
-  });
-  document.querySelectorAll('button[data-metal-call]').forEach(btn => btn.onclick = async () => {
-    try {
-      const r = await call(`/api/metal-call/${btn.dataset.metalCall}`, {});
-      say(`Metal x402 call paid for ${r.agent_id} (${r.tx_id}). Used ${r.calls_used} of ${r.call_cap}.`);
-    } catch (e) { say(`Refused: ${e.message}`, true); }
-    await render();
-  });
-  document.querySelectorAll('button[data-metal-spike]').forEach(btn => btn.onclick = async () => {
-    try {
-      const r = await call('/api/metal-rebalance', {agent_id: btn.dataset.metalSpike, new_price: '0.50'});
-      say(`Rebalanced ${r.agent_id} price to ${r.new_price}. Only its call cap changed.`);
-    } catch (e) { say(`Refused: ${e.message}`, true); }
-    await render();
-  });
-}
-document.getElementById('deposit-form').onsubmit = async (ev) => {
-  ev.preventDefault();
-  say('Working. One moment.');
-  try {
-    const r = await call('/api/simulate-deposit',
-      {currency: document.getElementById('currency').value, amount: document.getElementById('amount').value});
-    say(`Deposit landed: ${r.amount}. Invalidated: ${r.invalidated.join(', ') || 'none'}. Still valid: ${r.still_valid.join(', ') || 'none'}.`);
-  } catch (e) { say(`Refused: ${e.message}`, true); }
-  await render();
-};
-document.getElementById('reset').onclick = async () => { await call('/api/reset', {}); say('Demo reset.'); await render(); };
-render().then(() => say('Ready. Approve a USD and a EUR payout to begin.'));
-</script>
-</body>
-</html>
+<footer>
+  <p>Amounts speak in major units with integer cents beside them so the number Elena hears on a screen reader is the exact number the Airwallex boundary receives.</p>
+</footer>
 """
+    + UI_SCRIPT
+    + "\n</body>\n</html>\n"
+)

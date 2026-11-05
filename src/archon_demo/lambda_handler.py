@@ -97,6 +97,33 @@ def dispatch_http(
                 "application/json",
                 set_cookie,
             )
+        if method == "POST" and path == "/api/metal-mandate":
+            payload = _parse_json_object(raw)
+            if "agent_id" not in payload or "new_max_price_cents" not in payload:
+                raise ValueError("agent_id and new_max_price_cents are required")
+            return (
+                200,
+                service.replace_metal_mandate(str(payload["agent_id"]), int(payload["new_max_price_cents"])),
+                "application/json",
+                set_cookie,
+            )
+        if method == "POST" and path == "/api/metal-dispute":
+            return 200, service.resolve_metal_dispute(), "application/json", set_cookie
+        if method == "POST" and path == "/api/customer-email":
+            payload = _parse_json_object(raw)
+            contradicts = bool(payload.get("contradicts", True))
+            return 200, service.apply_customer_email(contradicts), "application/json", set_cookie
+        if method == "POST" and path == "/api/evaluate-invoice":
+            payload = _parse_json_object(raw)
+            oid = str(payload.get("obligation_id", "obl-usd-1"))
+            mode = str(payload.get("mode", "matching"))
+            return 200, service.inspect_invoice(oid, mode), "application/json", set_cookie
+        if method == "POST" and path == "/api/incident-fail":
+            payload = _parse_json_object(raw)
+            ftype = str(payload.get("failure_type", "bank_return"))
+            return 200, service.trigger_incident_failure(ftype), "application/json", set_cookie
+        if method == "POST" and path == "/api/incident-resolve":
+            return 200, service.resolve_incident(), "application/json", set_cookie
         if method == "POST" and path == "/api/reset":
             service.reset()
             return 200, {"state": "reset"}, "application/json", set_cookie

@@ -76,6 +76,32 @@ class ServiceStoryTest(unittest.TestCase):
         self.assertEqual(row["approval_state"], "NOT_APPROVED")
         self.assertTrue(row["action_reason"])  # H2: never a bare disabled control
 
+    def test_kit1_forecast_email_and_evaluator_inspector(self):
+        service = DemoService.seeded(AS_OF)
+        fc = service.apply_customer_email(True)
+        self.assertEqual(fc["confidence_pct"], 35)
+        self.assertTrue(fc["contradicted_by_email"])
+        fc_restored = service.apply_customer_email(False)
+        self.assertEqual(fc_restored["confidence_pct"], 92)
+        ok_rep = service.inspect_invoice("obl-usd-1", "matching")
+        self.assertEqual(ok_rep["verdict"], "PROPOSED")
+        bad_rep = service.inspect_invoice("obl-usd-1", "mismatched")
+        self.assertEqual(bad_rep["verdict"], "REFUSED")
+
+    def test_kit3_incident_and_kit11_dispute_in_service(self):
+        service = DemoService.seeded(AS_OF)
+        failed = service.trigger_incident_failure("bank_return")
+        self.assertEqual(failed["status"], "CANCELLED")
+        resolved = service.resolve_incident()
+        self.assertEqual(resolved["decision"], "REPLACE")
+        self.assertIsNotNone(resolved["replacement_transfer_id"])
+        with self.assertRaises(DomainError):
+            service.resolve_incident()
+        mandate = service.replace_metal_mandate("agent-fx", 60)
+        self.assertEqual(mandate["new_max_price_cents"], 60)
+        dispute = service.resolve_metal_dispute()
+        self.assertEqual(dispute["refunded_cents"], 5)
+
 
 class HttpStoryTest(unittest.TestCase):
     @classmethod
@@ -130,6 +156,12 @@ class HttpStoryTest(unittest.TestCase):
         status, body = self._call("/api/execute/obl-eur-1", {})
         self.assertEqual(status, 409)
         self.assertIn("stale", json.loads(body)["error"])
+        self.assertEqual(self._call("/api/customer-email", {"contradicts": True})[0], 200)
+        self.assertEqual(self._call("/api/evaluate-invoice", {"obligation_id": "obl-usd-1", "mode": "matching"})[0], 200)
+        self.assertEqual(self._call("/api/incident-fail", {"failure_type": "bank_return"})[0], 200)
+        self.assertEqual(self._call("/api/incident-resolve", {})[0], 200)
+        self.assertEqual(self._call("/api/metal-mandate", {"agent_id": "agent-fx", "new_max_price_cents": 60})[0], 200)
+        self.assertEqual(self._call("/api/metal-dispute", {})[0], 200)
 
 
 if __name__ == "__main__":

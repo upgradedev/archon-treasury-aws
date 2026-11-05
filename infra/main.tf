@@ -54,6 +54,24 @@ resource "aws_iam_role_policy_attachment" "basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+resource "aws_iam_role_policy" "bedrock_haiku" {
+  name = "ArchonBedrockHaikuEvaluator"
+  role = aws_iam_role.lambda.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["bedrock:InvokeModel"]
+        Resource = [
+          "arn:aws:bedrock:*::foundation-model/*anthropic*",
+          "arn:aws:bedrock:*:*:inference-profile/*anthropic*"
+        ]
+      }
+    ]
+  })
+}
+
 resource "aws_lambda_function" "demo" {
   function_name    = "archon-treasury-demo"
   runtime          = "python3.12"
@@ -66,7 +84,8 @@ resource "aws_lambda_function" "demo" {
 
   environment {
     variables = {
-      DEPLOYED_SHA = var.deployed_sha
+      DEPLOYED_SHA               = var.deployed_sha
+      ARCHON_ENABLE_LIVE_BEDROCK = "1"
     }
   }
 }

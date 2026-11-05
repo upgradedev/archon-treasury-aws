@@ -28,7 +28,7 @@ Prerequisites: Python 3.11 or newer. There is nothing to install; the runtime is
 ```powershell
 # Windows PowerShell, from the repo root
 $env:PYTHONPATH='src'; python -m unittest discover -s tests
-# Expected: Ran 104 tests ... OK
+# Expected: Ran 111 tests ... OK
 python scripts/verify_gates.py --self-test
 # Expected: RESULT: PASS auto-gates=10 failed=none (offline; live URL is smoked separately)
 python scripts/run_benchmark.py
@@ -103,10 +103,10 @@ Every number below names the command that produces it. Run them; do not take thi
 
 | Claim | Value | Command |
 |---|---|---|
-| Unit, UAT, and integration tests | 104 passing, 0 failures | `PYTHONPATH=src python -m unittest discover -s tests` |
+| Unit, UAT, and integration tests | 111 passing, 0 failures | `PYTHONPATH=src python -m unittest discover -s tests` |
 | Hosted model alone, same 62 rule cases | 28 of 62 (Claude Haiku on Bedrock, one pass) | `PYTHONPATH=src python scripts/run_llm_benchmark.py` with AWS credentials |
-| Line coverage, pure core / demo / adapters | 97% (671/690), 93% (418/445), 84% (372/439) | `python scripts/coverage_check.py` |
-| Live judge journey | 31 of 31 smoke steps pass | `python scripts/smoke_deployed.py https://pjlgavqdkhrcserxuqjz6icit40vbfxv.lambda-url.eu-west-1.on.aws/` |
+| Line coverage, pure core / demo / adapters | 95% (876/915), 94% (654/694), 87% (469/537) | `python scripts/coverage_check.py 85` |
+| Live judge journey | 38 of 38 smoke steps pass | `python scripts/smoke_deployed.py https://pjlgavqdkhrcserxuqjz6icit40vbfxv.lambda-url.eu-west-1.on.aws/` |
 | Accessibility audit | 0 axe-core violations at 375px and 1280px | axe-core 4.10.2 injected over DevTools on the live URL, 2026-11-05 |
 | Offline gates | 10 of 10 pass | `python scripts/verify_gates.py --self-test` |
 | Frozen benchmark, deterministic engine | 74 of 74 cases | `PYTHONPATH=src python scripts/run_benchmark.py` |

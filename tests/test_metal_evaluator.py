@@ -4,10 +4,29 @@ import unittest
 
 from adapters.airwallex_client import AdapterError
 from adapters.evaluator import DeterministicEvaluator, parse_invoice_text
-from adapters.metal_client import AgentBudget, FakeMetalTransport, MetalSpendGovernor
+from adapters.metal_client import (
+    AgentBudget,
+    FakeMetalTransport,
+    MetalSpendGovernor,
+    SignedX402Order,
+    sign_x402_order,
+)
 from fixtures import clean_snapshot
-from kerdon.errors import DomainError
+from kerdon.errors import DomainError, DuplicateRequestIdError
+from kerdon.models import DocKind, DocumentEvidence
 from kerdon.money import Money
+from kerdon.planner import (
+    IncidentDecision,
+    PayoutRail,
+    PlanAction,
+    TransferIncident,
+    TransferLifecycle,
+    build_treasury_plan,
+    evaluate_forecast_confidence,
+    rail_fee_for,
+    resolve_transfer_incident,
+    transition_incident_to_cancelled,
+)
 
 
 def governor():
@@ -54,6 +73,80 @@ class MetalTest(unittest.TestCase):
                 (AgentBudget("a", 90, Money(1, "USDZ")),),
                 FakeMetalTransport(),
             )
+
+    def test_mandate_per_call_cap_and_replacement(self):
+        g = MetalSpendGovernor(
+            Money(100_00, "USDZ"),
+            (AgentBudget("sourcing", 100, Money(4, "USDZ"), max_price_per_call_cents=3),),
+            FakeMetalTransport(),
+        )
+        with self.assertRaises(AdapterError):
+            g.pay_for_call("sourcing", "upstream-query")
+        g.replace_mandate("sourcing", 5)
+        self.assertEqual(g.pay_for_call("sourcing", "upstream-query"), "mtl_fake_1")
+        with self.assertRaises(AdapterError):
+            g.replace_mandate("sourcing", 0)
+        with self.assertRaises(AdapterError):
+            g.replace_mandate("unknown", 5)
+
+    def test_resolve_disputed_batch_verifies_signatures_and_refunds_faulty(self):
+        g = governor()
+        orders = (
+            SignedX402Order("o-1", "c-1", "/r", 5, True, sign_x402_order("o-1", "c-1", "/r", 5)),
+            SignedX402Order("o-2", "c-1", "/r", 5, False, sign_x402_order("o-2", "c-1", "/r", 5)),
+            SignedX402Order("o-3", "c-1", "/r", 5, False, "bad-sig"),
+        )
+        res = g.resolve_disputed_batch("agent-docs", orders)
+        self.assertEqual(res["refunded_cents"], 5)
+        decisions = [v["decision"] for v in res["verdicts"]]
+        self.assertEqual(decisions, ["DENY_REFUND_VALID_DELIVERY", "REFUNDED_FAULTY_DATA", "REJECT_UNSIGNED"])
+        with self.assertRaises(AdapterError):
+            g.resolve_disputed_batch("agent-docs", orders)  # duplicate refund refused
+
+
+class PlannerAndIncidentTest(unittest.TestCase):
+    def test_forecast_confidence_and_swift_fees(self):
+        fc_std = evaluate_forecast_confidence(False, False)
+        self.assertEqual(fc_std.confidence_bps, 9200)
+        fc_low = evaluate_forecast_confidence(True, False)
+        self.assertEqual(fc_low.autonomous_limit_cents, 0)
+        fc_dep = evaluate_forecast_confidence(False, True)
+        self.assertEqual(fc_dep.confidence_bps, 9800)
+        self.assertEqual(rail_fee_for(PayoutRail.SWIFT).amount_cents, 1285)
+        self.assertEqual(rail_fee_for(PayoutRail.LOCAL).amount_cents, 0)
+
+    def test_build_treasury_plan_classifies_obligations(self):
+        snap = clean_snapshot()
+        fc = evaluate_forecast_confidence(False, False)
+        plan = build_treasury_plan(snap, {"obl-1": PayoutRail.SWIFT}, {"obl-1": "CRITICAL_OPS"}, fc)
+        self.assertEqual(plan[0].action, PlanAction.FUND_NOW)
+        self.assertEqual(plan[0].fee_cents, 1285)
+        bad_doc = DocumentEvidence("d-bad", DocKind.INVOICE, "supplier-a", Money(999_00, "USD"), "h", "INV-X", "obl-1")
+        snap_bad = snap.__class__(
+            as_of=snap.as_of,
+            balances=snap.balances,
+            obligations=snap.obligations,
+            documents=(bad_doc,),
+            reserve_floors=snap.reserve_floors,
+        )
+        plan_bad = build_treasury_plan(snap_bad, {}, {}, fc)
+        self.assertEqual(plan_bad[0].action, PlanAction.ESCALATE)
+
+    def test_incident_state_machine_and_duplicate_lock(self):
+        inc = TransferIncident(
+            "inc-1", "obl-1", "trn-1", "req-1", Money(800_00, "EUR"), PayoutRail.SWIFT, TransferLifecycle.SENT
+        )
+        decision_wait, _ = resolve_transfer_incident(inc, "trn-repl")
+        self.assertEqual(decision_wait, IncidentDecision.WAIT)
+        cancelled = transition_incident_to_cancelled(inc, "bank_return")
+        decision_rep, updated = resolve_transfer_incident(cancelled, "trn-repl-1")
+        self.assertEqual(decision_rep, IncidentDecision.REPLACE)
+        self.assertEqual(updated.replacement_transfer_id, "trn-repl-1")
+        self.assertEqual(updated.swift_fees_budgeted_cents, 2570)
+        with self.assertRaises(DuplicateRequestIdError):
+            resolve_transfer_incident(updated, "trn-repl-2")
+        with self.assertRaises(DomainError):
+            transition_incident_to_cancelled(cancelled, "bank_return")
 
 
 class EvaluatorTest(unittest.TestCase):

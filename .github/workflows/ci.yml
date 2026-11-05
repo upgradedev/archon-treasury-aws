@@ -64,7 +64,7 @@ jobs:
             --region "$AWS_REGION"
           aws lambda update-function-configuration \
             --function-name "$LAMBDA_FUNCTION" \
-            --environment "Variables={DEPLOYED_SHA=${GITHUB_SHA}}" \
+            --environment "Variables={DEPLOYED_SHA=${GITHUB_SHA},ARCHON_ENABLE_LIVE_BEDROCK=1}" \
             --region "$AWS_REGION"
           aws lambda wait function-updated \
             --function-name "$LAMBDA_FUNCTION" \
