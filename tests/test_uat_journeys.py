@@ -84,7 +84,9 @@ class AccessibilityStaticTest(unittest.TestCase):
     def test_page_landmarks_labels_and_single_h1(self):
         self.assertEqual(PAGE.count("<h1"), 1)
         for marker in ('href="#main"', 'id="main"', 'for="currency"', 'for="amount"',
-                       'aria-live="polite"', 'role="status"', "<header>", "<footer>"):
+                       'aria-live="polite"', 'role="status"', "<header>", "<footer>",
+                       "erp-shell", "erp-sidebar", 'id="company-select"',
+                       'id="cmdk-modal"', "tabular-nums", "font-mono"):
             self.assertIn(marker, PAGE)
 
 

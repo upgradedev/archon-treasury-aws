@@ -1,9 +1,10 @@
-"""Client-side controller for the Archon Treasury enterprise cockpit."""
+"""Client-side controller for the Archon Treasury High-Density ERP Cockpit."""
 
 UI_SCRIPT = """<script>
 const statusBox = document.getElementById('status');
 let lastState = null;
 let selectedReceiptId = null;
+let activeEntityScope = 'ALL';
 
 function say(text, isError) {
   statusBox.textContent = text;
@@ -65,7 +66,7 @@ function renderReceiptDrawer(s) {
     <div class="receipt-grid">
       <div>
         <div class="kv-label">Payout &amp; Supplier</div>
-        <div class="kv-val">${esc(target.supplier_name)} (<code>${esc(target.obligation_id)}</code>) &middot; ${esc(target.amount)}</div>
+        <div class="kv-val">${esc(target.supplier_name)} (<code>${esc(target.obligation_id)}</code>) &middot; <span class="font-mono">${esc(target.amount)}</span></div>
       </div>
       <div>
         <div class="kv-label">Merkle Root SHA-256 (Verified: ${r.merkle_verified ? 'YES' : 'NO'})</div>
@@ -84,7 +85,11 @@ function renderReceiptDrawer(s) {
 
 function render(s) {
   lastState = s;
-  document.getElementById('balances').innerHTML = s.balances.map(b => {
+  const filteredBalances = activeEntityScope === 'ALL'
+    ? s.balances
+    : s.balances.filter(b => b.currency === activeEntityScope);
+
+  document.getElementById('balances').innerHTML = filteredBalances.map(b => {
     const pct = b.amount_cents > 0 ? Math.min(100, Math.round((b.reserve_floor_cents / b.amount_cents) * 100)) : 100;
     const headroomPct = Math.max(0, 100 - pct);
     return `
@@ -93,13 +98,13 @@ function render(s) {
           <span class="acct-tag">${esc(b.currency)} WALLET</span>
           <span class="mono-sm">${esc(b.account_id)}</span>
         </div>
-        <div class="big-num">${esc(b.amount)}</div>
+        <div class="big-num font-mono tabular-nums">${esc(b.amount)}</div>
         <div class="meter-bar" role="img" aria-label="${esc(b.currency)} reserve floor utilization">
           <div class="meter-fill" style="width:${headroomPct}%"></div>
         </div>
         <div class="card-foot">
-          <span>Reserve floor: <strong>${esc(b.reserve_floor)}</strong></span>
-          <span>Spendable: <strong>${esc(b.headroom_major)}</strong></span>
+          <span>Reserve floor: <strong class="font-mono">${esc(b.reserve_floor)}</strong></span>
+          <span>Spendable: <strong class="font-mono">${esc(b.headroom_major)}</strong></span>
         </div>
       </div>`;
   }).join('');
@@ -113,7 +118,7 @@ function render(s) {
       <div class="forecast-row">
         <div>
           <span class="badge ${badgeCls}">${badgeTxt}</span>
-          <strong style="margin-left:0.5rem">Forecast Confidence: ${fc.confidence_pct}% (${fc.confidence_bps} bps)</strong>
+          <strong class="font-mono" style="margin-left:0.5rem">Confidence: ${fc.confidence_pct}% (${fc.confidence_bps} bps)</strong>
           <span class="mono-sm" style="margin-left:0.5rem">Autonomous FX Limit: ${esc(fc.autonomous_limit)}</span>
         </div>
         <div class="btn-row">
@@ -124,7 +129,11 @@ function render(s) {
       <p class="muted-note" style="margin:0.35rem 0 0">${esc(fc.reason)}</p>`;
   }
 
-  document.getElementById('obligations').innerHTML = s.obligations.map(o => {
+  const filteredObls = activeEntityScope === 'ALL'
+    ? s.obligations
+    : s.obligations.filter(o => o.currency === activeEntityScope);
+
+  document.getElementById('obligations').innerHTML = filteredObls.map(o => {
     const shaShort = o.approval_sha256 ? o.approval_sha256.slice(0, 12) : '';
     const inspectBtn = o.receipt
       ? `<button type="button" data-act="inspect-receipt" data-id="${esc(o.obligation_id)}">Receipt</button>`
@@ -135,8 +144,8 @@ function render(s) {
         <div class="sup-sub"><code>${esc(o.obligation_id)}</code> &middot; ${esc(o.invoice_ref)} &middot; ${esc(o.summary)}</div>
       </td>
       <td>
-        <div class="amt-main">${esc(o.amount)}</div>
-        <div class="sup-sub"><span class="rail-pill">${esc(o.rail)}</span> Fee: ${esc(o.rail_fee)}</div>
+        <div class="amt-main font-mono tabular-nums">${esc(o.amount)}</div>
+        <div class="sup-sub"><span class="rail-pill">${esc(o.rail)}</span> Fee: <span class="font-mono">${esc(o.rail_fee)}</span></div>
       </td>
       <td>
         ${planBadge(o.plan_action)}
@@ -170,10 +179,10 @@ function render(s) {
   const ml = document.getElementById('metal-agents');
   if (ml && s.metal_agents) {
     ml.innerHTML = s.metal_agents.map(a => `<tr>
-      <td><strong>${esc(a.agent_id)}</strong><div class="sup-sub">Share: ${a.weight_percent}%</div></td>
-      <td>${esc(a.allowance)}</td>
-      <td>${esc(a.price_per_call)}<div class="sup-sub">Mandate cap: ${a.max_price_per_call_cents ? a.max_price_per_call_cents + ' cents' : 'none'}</div></td>
-      <td><strong>${a.calls_used} / ${a.call_cap}</strong><div class="sup-sub">Spent: ${esc(a.spent)}</div></td>
+      <td><strong>${esc(a.agent_id)}</strong><div class="sup-sub font-mono">Share: ${a.weight_percent}%</div></td>
+      <td class="font-mono">${esc(a.allowance)}</td>
+      <td class="font-mono">${esc(a.price_per_call)}<div class="sup-sub">Mandate cap: ${a.max_price_per_call_cents ? a.max_price_per_call_cents + ' cents' : 'none'}</div></td>
+      <td class="font-mono"><strong>${a.calls_used} / ${a.call_cap}</strong><div class="sup-sub">Spent: ${esc(a.spent)}</div></td>
       <td>
         <div class="btn-row">
           <button type="button" data-act="metal-call" data-id="${esc(a.agent_id)}">Pay 1 call</button>
@@ -190,11 +199,11 @@ function render(s) {
     const stCls = inc.status === 'CANCELLED' ? (inc.replacement_transfer_id ? 'badge-ok' : 'badge-err') : 'badge-amber';
     incBox.innerHTML = `
       <div class="kv-grid">
-        <div><span class="kv-label">Incident ID:</span> <code>${esc(inc.incident_id)}</code> (${esc(inc.amount)} via ${esc(inc.rail)})</div>
+        <div><span class="kv-label">Incident ID:</span> <code>${esc(inc.incident_id)}</code> (<span class="font-mono">${esc(inc.amount)}</span> via ${esc(inc.rail)})</div>
         <div><span class="kv-label">Status:</span> <span class="badge ${stCls}">${esc(inc.status)}</span> ${inc.failure_type ? `<code>(${esc(inc.failure_type)})</code>` : ''}</div>
         <div><span class="kv-label">Original Transfer:</span> <code>${esc(inc.original_transfer_id)}</code> (req: <code>${esc(inc.original_request_id.slice(0, 12))}</code>)</div>
         <div><span class="kv-label">Replacement Transfer:</span> ${inc.replacement_transfer_id ? `<code>${esc(inc.replacement_transfer_id)}</code> (req: <code>${esc(inc.replacement_request_id.slice(0, 12))}</code>)` : '<em>None issued yet</em>'}</div>
-        <div><span class="kv-label">SWIFT Fee Budget:</span> <strong>${esc(inc.swift_fees_budgeted)}</strong></div>
+        <div><span class="kv-label">SWIFT Fee Budget:</span> <strong class="font-mono">${esc(inc.swift_fees_budgeted)}</strong></div>
       </div>`;
   }
 
@@ -202,7 +211,7 @@ function render(s) {
     const dr = s.last_dispute_report;
     document.getElementById('dispute-box').innerHTML = `
       <div class="sub-card">
-        <strong>Dispute Batch Verified (${dr.orders_checked} signed x402 orders) &middot; Refunded: ${esc(dr.refunded_spoken)}</strong>
+        <strong>Dispute Batch Verified (${dr.orders_checked} signed x402 orders) &middot; Refunded: <span class="font-mono">${esc(dr.refunded_spoken)}</span></strong>
         <ul class="compact-list">
           ${dr.verdicts.map(v => `<li><code>${esc(v.order_id)}</code>: HMAC Signature Valid=${v.signature_valid}, Data Quality OK=${v.data_quality_ok} &rarr; <strong>${esc(v.decision)}</strong> ${v.refund_tx ? `(tx: <code>${esc(v.refund_tx)}</code>)` : ''}</li>`).join('')}
         </ul>
@@ -237,6 +246,18 @@ async function runAction(btn, work) {
 }
 
 document.addEventListener('click', e => {
+  const navBtn = e.target.closest('button.nav-btn[data-view]');
+  if (navBtn) {
+    document.querySelectorAll('button.nav-btn').forEach(el => el.classList.remove('active'));
+    navBtn.classList.add('active');
+    const view = navBtn.dataset.view;
+    document.querySelectorAll('section[data-module]').forEach(sec => {
+      sec.style.display = (view === 'all' || sec.dataset.module === view) ? '' : 'none';
+    });
+    say('Filtered workspace view to module: ' + view.toUpperCase() + '.', false);
+    return;
+  }
+
   const b = e.target.closest('button[data-act]');
   if (!b) return;
   const act = b.dataset.act;
@@ -295,6 +316,75 @@ document.addEventListener('click', e => {
     }
     await refresh();
   });
+});
+
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+  const sb = document.getElementById('erp-sidebar');
+  sb.classList.toggle('collapsed');
+});
+
+document.getElementById('company-select').addEventListener('change', e => {
+  activeEntityScope = e.target.value;
+  if (lastState) render(lastState);
+  say('Switched entity scope to ' + e.target.options[e.target.selectedIndex].text + '.', false);
+});
+
+const COMMANDS = [
+  {id: 'cmd-eur-dep', label: 'Land Signed EUR 500.00 Deposit Webhook (Selective Invalidation)', badge: 'Kit 1', run: () => document.querySelector('[data-act="quick-eur-deposit"]').click()},
+  {id: 'cmd-usd-dep', label: 'Land Signed USD 200.00 Deposit (Restore Reserve Floor)', badge: 'Kit 1', run: () => document.querySelector('[data-act="quick-usd-deposit"]').click()},
+  {id: 'cmd-ai-match', label: 'Run Amazon Bedrock Evaluator on Matching Invoice ($450.00)', badge: 'Bedrock AI', run: () => document.querySelector('[data-act="ai-match"]').click()},
+  {id: 'cmd-ai-tamper', label: 'Run Amazon Bedrock Evaluator on Tampered Invoice ($495.00)', badge: 'Bedrock AI', run: () => document.querySelector('[data-act="ai-tamper"]').click()},
+  {id: 'cmd-inc-fail', label: 'Simulate Delayed SWIFT Bank Return (SENT -> CANCELLED)', badge: 'Kit 3', run: () => document.querySelector('[data-act="inc-fail"]').click()},
+  {id: 'cmd-inc-res', label: 'Issue Replacement SWIFT Transfer under 7-Day Duplicate Lock', badge: 'Kit 3', run: () => document.querySelector('[data-act="inc-resolve"]').click()},
+  {id: 'cmd-x402', label: 'Verify Signed x402 Disputed Order Batch & Refund Faulty Feed', badge: 'Kit 11', run: () => document.querySelector('[data-act="metal-dispute"]').click()},
+  {id: 'cmd-reset', label: 'Reset Demo Snapshot to Initial 72-Hour Close', badge: 'System', run: () => document.getElementById('reset').click()}
+];
+
+const cmdkModal = document.getElementById('cmdk-modal');
+const cmdkInput = document.getElementById('cmdk-input');
+const cmdkList = document.getElementById('cmdk-list');
+
+function renderCmdk(query) {
+  const q = (query || '').toLowerCase();
+  const matches = COMMANDS.filter(c => c.label.toLowerCase().includes(q) || c.badge.toLowerCase().includes(q));
+  cmdkList.innerHTML = matches.map((c, idx) => `
+    <li>
+      <button type="button" class="cmdk-item" data-cmd-idx="${COMMANDS.indexOf(c)}">
+        <span>${esc(c.label)}</span>
+        <span class="badge badge-indigo">${esc(c.badge)}</span>
+      </button>
+    </li>`).join('');
+}
+
+function openCmdk() {
+  cmdkModal.classList.add('open');
+  cmdkInput.value = '';
+  renderCmdk('');
+  setTimeout(() => cmdkInput.focus(), 20);
+}
+
+function closeCmdk() {
+  cmdkModal.classList.remove('open');
+}
+
+document.getElementById('cmdk-open').addEventListener('click', openCmdk);
+document.getElementById('cmdk-close').addEventListener('click', closeCmdk);
+cmdkInput.addEventListener('input', e => renderCmdk(e.target.value));
+cmdkList.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-cmd-idx]');
+  if (!btn) return;
+  const cmd = COMMANDS[Number(btn.dataset.cmdIdx)];
+  closeCmdk();
+  if (cmd) cmd.run();
+});
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    if (cmdkModal.classList.contains('open')) closeCmdk();
+    else openCmdk();
+  } else if (e.key === 'Escape' && cmdkModal.classList.contains('open')) {
+    closeCmdk();
+  }
 });
 
 document.getElementById('deposit-form').addEventListener('submit', e => {
