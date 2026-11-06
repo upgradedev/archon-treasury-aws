@@ -6,7 +6,31 @@ on:
   workflow_dispatch:
 
 jobs:
-  gates:
+  static-and-architecture-gates:
+    name: "Stage 1: Architecture & Hygiene Gates (10/10)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run 10 deterministic hexagonal & hygiene gates + self-test
+        run: python scripts/verify_gates.py --self-test
+
+  security-audit:
+    name: "Stage 2: DevSecOps Security (SAST, Secrets, IaC, OWASP)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run SAST (Python & TS/TSX), Secret Scan, Terraform IaC & OWASP Header Audit
+        run: python scripts/security_audit.py
+
+  testing-pyramid-unit:
+    name: "Stage 3: Pyramid L1 - Domain Unit Tests & Coverage (${{ matrix.python-version }})"
+    needs: [static-and-architecture-gates]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -16,16 +40,84 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      # Runtime dependencies: none. Stdlib only, so there is no install step.
-      - name: Unit tests
-        run: PYTHONPATH=src python -m unittest discover -s tests -v
-      - name: Phase gates (A1, A5, B4/G4/F5, C2, 21 rules, integer cents)
-        run: python scripts/verify_gates.py --self-test
-      - name: Line coverage of the pure core (C1, minimum 85)
+      - name: Pure Hexagonal Domain Unit Tests (Money, 21 Rules, Approvals, Merkle, Benchmark)
+        run: |
+          PYTHONPATH=src python -m unittest -v \
+            tests/test_money.py \
+            tests/test_completeness.py \
+            tests/test_approvals.py \
+            tests/test_receipts.py \
+            tests/test_benchmark.py
+      - name: Enforce Line Coverage >= 85% across Core, Demo & Adapters
         run: python scripts/coverage_check.py 85
 
+  testing-pyramid-integration:
+    name: "Stage 4: Pyramid L2 - Adapter, Contract & HTTP Integration"
+    needs: [testing-pyramid-unit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Adapter & Boundary Contract Tests (Airwallex, Socket Stub, Bedrock, Metal x402, Sessions, Lambda)
+        run: |
+          PYTHONPATH=src python -m unittest -v \
+            tests/test_airwallex_adapter.py \
+            tests/test_live_transport.py \
+            tests/test_bedrock_evaluator.py \
+            tests/test_metal_evaluator.py \
+            tests/test_sessions.py \
+            tests/test_lambda_handler.py \
+            tests/test_demo_app.py
+
+  testing-pyramid-e2e-local:
+    name: "Stage 5: Pyramid L3 - UAT, Concurrency Race & Local 39-Step E2E"
+    needs: [testing-pyramid-integration]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: UAT Journeys, 8-Thread Concurrency Race, Hostile Inputs & A11y Landmarks
+        run: PYTHONPATH=src python -m unittest -v tests/test_uat_journeys.py
+      - name: Boot Local Ephemeral Server & Execute 39-Step E2E Smoke
+        run: |
+          PYTHONPATH=src python -m archon_demo.server --port 8765 &
+          SERVER_PID=$!
+          sleep 1
+          python scripts/smoke_deployed.py http://127.0.0.1:8765
+          kill $SERVER_PID || true
+
+  frontend-erp-build:
+    name: "Stage 6: React + TypeScript + Vite + Tailwind ERP Build"
+    needs: [security-audit]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Frontend Dependencies
+        run: npm install --no-audit --no-fund
+      - name: TypeScript Strict Check & Vite Production Build
+        run: npm run build
+      - name: Verify Production Bundle Artifact
+        run: test -f dist/index.html
+
   deploy:
-    needs: gates
+    name: "Stage 7: CD Deploy to AWS Lambda & 39-Step Live Production Smoke"
+    needs:
+      - static-and-architecture-gates
+      - security-audit
+      - testing-pyramid-unit
+      - testing-pyramid-integration
+      - testing-pyramid-e2e-local
+      - frontend-erp-build
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     permissions:
@@ -52,7 +144,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: Deploy to AWS Lambda and run 31-step live smoke
+      - name: Deploy to AWS Lambda and run 39-step live production smoke
         if: env.AWS_ROLE_TO_ASSUME != '' || env.AWS_ACCESS_KEY_ID != ''
         run: |
           aws lambda update-function-code \
@@ -70,4 +162,3 @@ jobs:
             --function-name "$LAMBDA_FUNCTION" \
             --region "$AWS_REGION"
           python scripts/smoke_deployed.py "$LIVE_URL"
-
