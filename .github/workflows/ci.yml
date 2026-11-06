@@ -42,7 +42,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Pure Hexagonal Domain Unit Tests (Money, 21 Rules, Approvals, Merkle, Benchmark)
         run: |
-          PYTHONPATH=src python -m unittest -v \
+          PYTHONPATH=src:tests python -m unittest -v \
             tests/test_money.py \
             tests/test_completeness.py \
             tests/test_approvals.py \
@@ -62,7 +62,7 @@ jobs:
           python-version: "3.12"
       - name: Adapter & Boundary Contract Tests (Airwallex, Socket Stub, Bedrock, Metal x402, Sessions, Lambda)
         run: |
-          PYTHONPATH=src python -m unittest -v \
+          PYTHONPATH=src:tests python -m unittest -v \
             tests/test_airwallex_adapter.py \
             tests/test_live_transport.py \
             tests/test_bedrock_evaluator.py \
@@ -81,7 +81,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: UAT Journeys, 8-Thread Concurrency Race, Hostile Inputs & A11y Landmarks
-        run: PYTHONPATH=src python -m unittest -v tests/test_uat_journeys.py
+        run: PYTHONPATH=src:tests python -m unittest -v tests/test_uat_journeys.py
       - name: Boot Local Ephemeral Server & Execute 39-Step E2E Smoke
         run: |
           PYTHONPATH=src python -m archon_demo.server --port 8765 &
