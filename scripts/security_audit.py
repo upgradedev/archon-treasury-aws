@@ -120,6 +120,8 @@ def check_iac_policy() -> tuple[bool, str]:
         issues.append("wildcard IAM Action/Resource policy detected")
     if "timeout" not in tf or "memory_size" not in tf:
         issues.append("Lambda resource missing explicit timeout/memory_size limits")
+    if "aws_cloudwatch_log_group" not in tf or "retention_in_days" not in tf:
+        issues.append("CloudWatch Log Group missing explicit retention_in_days policy")
     if "lambda:InvokeFunctionUrl" not in tf or "lambda:InvokeFunction" not in tf:
         issues.append("Lambda Function URL permissions incomplete")
     return (not issues), f"infra/main.tf verified; issues={issues or 'none'}"
@@ -136,6 +138,8 @@ def check_owasp_runtime_headers() -> tuple[bool, str]:
         issues.append("missing X-Content-Type-Options: nosniff")
     if headers.get("referrer-policy") != "no-referrer":
         issues.append("missing Referrer-Policy: no-referrer")
+    if "max-age=" not in headers.get("strict-transport-security", ""):
+        issues.append("missing Strict-Transport-Security (HSTS) header")
     csp = headers.get("content-security-policy", "")
     for directive in ("default-src 'self'", "frame-ancestors 'none'", "object-src 'none'"):
         if directive not in csp:

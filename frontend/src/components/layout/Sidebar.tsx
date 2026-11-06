@@ -10,10 +10,11 @@ interface NavItem {
 }
 
 const NAV_ITEMS: ReadonlyArray<NavItem> = [
-  { id: 'all', label: 'All Modules (Cockpit)', badgeText: '6', badgeIntent: 'indigo' },
+  { id: 'all', label: 'All Modules (Cockpit)', badgeText: '7', badgeIntent: 'indigo' },
   { id: 'payouts', label: 'Supplier Payouts (Kit 1)', badgeText: '4', badgeIntent: 'neutral' },
   { id: 'audit', label: 'Completeness Audit', badgeText: '21', badgeIntent: 'warning' },
   { id: 'incidents', label: 'Incident Ops (Kit 3)', badgeText: 'SWIFT', badgeIntent: 'critical' },
+  { id: 'visa', label: 'Visa Cards (Kit 9)', badgeText: 'VISA', badgeIntent: 'indigo' },
   { id: 'metal', label: 'Metal x402 (Kit 11)', badgeText: 'USDZ', badgeIntent: 'success' },
   { id: 'evaluator', label: 'Bedrock Evaluator', badgeText: 'AI', badgeIntent: 'indigo' },
 ];

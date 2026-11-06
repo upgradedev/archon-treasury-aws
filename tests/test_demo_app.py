@@ -158,6 +158,23 @@ class HttpStoryTest(unittest.TestCase):
         self.assertIn("stale", json.loads(body)["error"])
         self.assertEqual(self._call("/api/customer-email", {"contradicts": True})[0], 200)
         self.assertEqual(self._call("/api/evaluate-invoice", {"obligation_id": "obl-usd-1", "mode": "matching"})[0], 200)
+        self.assertEqual(
+            self._call(
+                "/api/evaluate-invoice",
+                {
+                    "obligation_id": "obl-usd-1",
+                    "mode": "custom",
+                    "custom_text": "INVOICE INV-1\nCounterparty: supplier-a\nTotal due USD 450.00",
+                },
+            )[0],
+            200,
+        )
+        self.assertEqual(self._call("/api/visa-issue", {})[0], 200)
+        self.assertEqual(self._call("/api/visa-charge", {"charge_cents": 45000, "merchant_mcc": "5812"})[0], 200)
+        self.assertEqual(self._call("/api/visa-charge", {"charge_cents": 45000, "merchant_mcc": "5045"})[0], 200)
+        csv_status, csv_body = self._call("/api/audit-export.csv")
+        self.assertEqual(csv_status, 200)
+        self.assertIn("obl-usd-1", csv_body)
         self.assertEqual(self._call("/api/incident-fail", {"failure_type": "bank_return"})[0], 200)
         self.assertEqual(self._call("/api/incident-resolve", {})[0], 200)
         self.assertEqual(self._call("/api/metal-mandate", {"agent_id": "agent-fx", "new_max_price_cents": 60})[0], 200)

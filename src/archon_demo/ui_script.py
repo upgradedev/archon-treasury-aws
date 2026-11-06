@@ -85,6 +85,14 @@ function renderReceiptDrawer(s) {
 
 function render(s) {
   lastState = s;
+  if (s.roi_telemetry) {
+    const rt = s.roi_telemetry;
+    const roiEl = document.getElementById('roi-strip');
+    if (roiEl) {
+      roiEl.textContent = `Protected: ${rt.protected_liquidity_major} · Saved Fees: ${rt.local_rail_fees_saved_major} · Engine: ${rt.engine_latency_ms}ms`;
+    }
+  }
+
   const filteredBalances = activeEntityScope === 'ALL'
     ? s.balances
     : s.balances.filter(b => b.currency === activeEntityScope);
@@ -176,6 +184,22 @@ function render(s) {
       }).join('')
     : '<li class="finding-item">No completeness gaps detected across 21 deterministic rules.</li>';
 
+  if (s.visa_mandate) {
+    const vm = s.visa_mandate;
+    const vmBox = document.getElementById('visa-box');
+    if (vmBox) {
+      const stCls = vm.status === 'USED' ? 'badge-indigo' : (vm.status === 'ACTIVE' ? 'badge-ok' : 'badge-neutral');
+      const vCls = (vm.last_verdict || '').startsWith('DECLINED') ? 'badge-err' : 'badge-ok';
+      vmBox.innerHTML = `
+        <div class="kv-grid">
+          <div><span class="kv-label">Virtual Card &amp; Supplier:</span> <code>${esc(vm.card_id)}</code> (Visa *${esc(vm.card_last4)}) &middot; <strong>${esc(vm.supplier_name)}</strong></div>
+          <div><span class="kv-label">Mandate Cap &amp; MCC Lock:</span> <span class="font-mono">${esc(vm.limit)}</span> &middot; Locked MCC: <code>${esc(vm.allowed_mcc)}</code> (Single-Use: ${vm.single_use ? 'YES' : 'NO'})</div>
+          <div><span class="kv-label">Card Status &amp; Rebate:</span> <span class="badge ${stCls}">${esc(vm.status)}</span> &middot; Rebate Earned: <strong class="font-mono">${esc(vm.rebate_earned)}</strong></div>
+          ${vm.last_verdict ? `<div><span class="kv-label">Last Auth Verdict:</span> <span class="badge ${vCls}">${esc(vm.last_verdict)}</span> ${esc(vm.last_reason || '')}</div>` : ''}
+        </div>`;
+    }
+  }
+
   const ml = document.getElementById('metal-agents');
   if (ml && s.metal_agents) {
     ml.innerHTML = s.metal_agents.map(a => `<tr>
@@ -225,7 +249,7 @@ function render(s) {
     const vCls = ai.verdict === 'PROPOSED' ? 'badge-ok' : 'badge-err';
     document.getElementById('ai-box').innerHTML = `
       <div class="sub-card">
-        <div><span class="badge ${vCls}">${esc(ai.verdict)}</span> <strong>Engine:</strong> <code>${esc(ai.engine)}</code></div>
+        <div><span class="badge ${vCls}">${esc(ai.verdict)}</span> <strong>Engine:</strong> <code>${esc(ai.engine)}</code> <span class="badge badge-neutral font-mono">${ai.latency_ms || 1}ms</span></div>
         <div style="margin-top:0.35rem">${esc(ai.reason)}</div>
         ${ai.evidence_sha256 ? `<div class="sup-sub">Bound Evidence SHA-256: <code>${esc(ai.evidence_sha256)}</code></div>` : ''}
         <pre class="code-preview">${esc(ai.invoice_preview)}</pre>
@@ -267,6 +291,11 @@ document.addEventListener('click', e => {
       const r = await call('/api/approve/' + id, {});
       selectedReceiptId = id;
       say('Approved ' + r.obligation_id + ' (digest ' + r.approval_sha256.slice(0, 12) + '). Merkle receipt sealed.', false);
+    } else if (act === 'quick-approve-both') {
+      const r1 = await call('/api/approve/obl-usd-1', {});
+      const r2 = await call('/api/approve/obl-eur-1', {});
+      selectedReceiptId = 'obl-usd-1';
+      say('Step 1 complete: Approved obl-usd-1 (' + r1.approval_sha256.slice(0, 8) + ') & obl-eur-1 (' + r2.approval_sha256.slice(0, 8) + '). Click Step 2 next!', false);
     } else if (act === 'execute') {
       const sha = b.dataset.sha || undefined;
       const r = await call('/api/execute/' + id, sha ? {approval_sha256: sha} : {});
@@ -276,6 +305,15 @@ document.addEventListener('click', e => {
       if (lastState) renderReceiptDrawer(lastState);
       say('Showing cryptographic Merkle receipt for ' + id + '.', false);
       return;
+    } else if (act === 'visa-issue') {
+      const r = await call('/api/visa-issue', {});
+      say('Kit 9: Issued single-use Virtual Visa *' + r.card_last4 + ' (' + r.limit + ') locked to MCC ' + r.allowed_mcc + '.', false);
+    } else if (act === 'visa-wrong-mcc') {
+      const r = await call('/api/visa-charge', {charge_cents: 45000, merchant_mcc: '5812'});
+      say('Kit 9 Spend Control: ' + r.last_verdict + ' (' + r.last_reason + ')', true);
+    } else if (act === 'visa-valid-charge') {
+      const r = await call('/api/visa-charge', {charge_cents: 45000, merchant_mcc: '5045'});
+      say('Kit 9 Virtual Visa: ' + r.last_verdict + ' (' + r.last_reason + ')', r.last_verdict !== 'APPROVED_SINGLE_USE');
     } else if (act === 'metal-call') {
       const r = await call('/api/metal-call/' + id, {});
       say('Paid 1 USDZ call for ' + r.agent_id + ' (' + r.tx_id + ', ' + r.calls_used + '/' + r.call_cap + ' calls).', false);
@@ -295,12 +333,18 @@ document.addEventListener('click', e => {
     } else if (act === 'email-restore') {
       const r = await call('/api/customer-email', {contradicts: false});
       say('Forecast confidence restored to ' + r.confidence_pct + '% (' + r.autonomous_limit + ').', false);
+    } else if (act === 'ai-custom') {
+      const txt = document.getElementById('custom-invoice-text').value;
+      const r = await call('/api/evaluate-invoice', {obligation_id: 'obl-usd-1', mode: 'custom', custom_text: txt});
+      say('Evaluator (' + r.engine + ', ' + r.latency_ms + 'ms): ' + r.verdict + ' (' + r.reason + ')', r.verdict !== 'PROPOSED');
     } else if (act === 'ai-match') {
       const r = await call('/api/evaluate-invoice', {obligation_id: 'obl-usd-1', mode: 'matching'});
-      say('Evaluator (' + r.engine + '): ' + r.verdict + ' for ' + r.obligation_id + '.', false);
+      document.getElementById('custom-invoice-text').value = r.invoice_preview;
+      say('Evaluator (' + r.engine + ', ' + r.latency_ms + 'ms): ' + r.verdict + ' for ' + r.obligation_id + '.', false);
     } else if (act === 'ai-tamper') {
       const r = await call('/api/evaluate-invoice', {obligation_id: 'obl-usd-1', mode: 'mismatched'});
-      say('Evaluator (' + r.engine + '): ' + r.verdict + ' tampered invoice (' + r.reason + ').', true);
+      document.getElementById('custom-invoice-text').value = r.invoice_preview;
+      say('Evaluator (' + r.engine + ', ' + r.latency_ms + 'ms): ' + r.verdict + ' tampered invoice (' + r.reason + ').', true);
     } else if (act === 'inc-fail') {
       const r = await call('/api/incident-fail', {failure_type: 'bank_return'});
       say('Transfer ' + r.original_transfer_id + ' transitioned to CANCELLED (' + r.failure_type + ').', false);
@@ -330,13 +374,15 @@ document.getElementById('company-select').addEventListener('change', e => {
 });
 
 const COMMANDS = [
+  {id: 'cmd-step1', label: 'Approve USD & EUR Supplier Payouts (Seal Merkle Receipts)', badge: 'Kit 1', run: () => document.querySelector('[data-act="quick-approve-both"]').click()},
   {id: 'cmd-eur-dep', label: 'Land Signed EUR 500.00 Deposit Webhook (Selective Invalidation)', badge: 'Kit 1', run: () => document.querySelector('[data-act="quick-eur-deposit"]').click()},
   {id: 'cmd-usd-dep', label: 'Land Signed USD 200.00 Deposit (Restore Reserve Floor)', badge: 'Kit 1', run: () => document.querySelector('[data-act="quick-usd-deposit"]').click()},
-  {id: 'cmd-ai-match', label: 'Run Amazon Bedrock Evaluator on Matching Invoice ($450.00)', badge: 'Bedrock AI', run: () => document.querySelector('[data-act="ai-match"]').click()},
-  {id: 'cmd-ai-tamper', label: 'Run Amazon Bedrock Evaluator on Tampered Invoice ($495.00)', badge: 'Bedrock AI', run: () => document.querySelector('[data-act="ai-tamper"]').click()},
+  {id: 'cmd-ai-match', label: 'Run Amazon Bedrock Evaluator on Custom Invoice Text', badge: 'Bedrock AI', run: () => document.querySelector('[data-act="ai-custom"]').click()},
+  {id: 'cmd-visa', label: 'Issue Single-Use Virtual Visa Card (*4829) Locked to MCC 5045', badge: 'Kit 9 Visa', run: () => document.querySelector('[data-act="visa-issue"]').click()},
   {id: 'cmd-inc-fail', label: 'Simulate Delayed SWIFT Bank Return (SENT -> CANCELLED)', badge: 'Kit 3', run: () => document.querySelector('[data-act="inc-fail"]').click()},
   {id: 'cmd-inc-res', label: 'Issue Replacement SWIFT Transfer under 7-Day Duplicate Lock', badge: 'Kit 3', run: () => document.querySelector('[data-act="inc-resolve"]').click()},
   {id: 'cmd-x402', label: 'Verify Signed x402 Disputed Order Batch & Refund Faulty Feed', badge: 'Kit 11', run: () => document.querySelector('[data-act="metal-dispute"]').click()},
+  {id: 'cmd-csv', label: 'Export Signed Reconciliation Audit Trail (CSV)', badge: 'Audit', run: () => { window.location.href = '/api/audit-export.csv'; }},
   {id: 'cmd-reset', label: 'Reset Demo Snapshot to Initial 72-Hour Close', badge: 'System', run: () => document.getElementById('reset').click()}
 ];
 
@@ -347,7 +393,7 @@ const cmdkList = document.getElementById('cmdk-list');
 function renderCmdk(query) {
   const q = (query || '').toLowerCase();
   const matches = COMMANDS.filter(c => c.label.toLowerCase().includes(q) || c.badge.toLowerCase().includes(q));
-  cmdkList.innerHTML = matches.map((c, idx) => `
+  cmdkList.innerHTML = matches.map(c => `
     <li>
       <button type="button" class="cmdk-item" data-cmd-idx="${COMMANDS.indexOf(c)}">
         <span>${esc(c.label)}</span>

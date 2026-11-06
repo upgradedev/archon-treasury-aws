@@ -90,6 +90,11 @@ resource "aws_lambda_function" "demo" {
   }
 }
 
+resource "aws_cloudwatch_log_group" "demo" {
+  name              = "/aws/lambda/${aws_lambda_function.demo.function_name}"
+  retention_in_days = 14
+}
+
 resource "aws_lambda_function_url" "demo" {
   function_name      = aws_lambda_function.demo.function_name
   authorization_type = "NONE"

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState } from 'react';
 
 export type EntityScope = 'ALL' | 'USD' | 'EUR' | 'GBP';
-export type ErpModuleId = 'all' | 'payouts' | 'audit' | 'incidents' | 'metal' | 'evaluator';
+export type ErpModuleId = 'all' | 'payouts' | 'audit' | 'incidents' | 'visa' | 'metal' | 'evaluator';
 
 interface ShellContextValue {
   sidebarCollapsed: boolean;

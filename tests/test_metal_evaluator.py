@@ -16,13 +16,17 @@ from kerdon.errors import DomainError, DuplicateRequestIdError
 from kerdon.models import DocKind, DocumentEvidence
 from kerdon.money import Money
 from kerdon.planner import (
+    CardMandateStatus,
     IncidentDecision,
     PayoutRail,
     PlanAction,
     TransferIncident,
     TransferLifecycle,
+    VirtualCardMandate,
+    authorize_virtual_card_charge,
     build_treasury_plan,
     evaluate_forecast_confidence,
+    issue_virtual_visa_card,
     rail_fee_for,
     resolve_transfer_incident,
     transition_incident_to_cancelled,
@@ -147,6 +151,29 @@ class PlannerAndIncidentTest(unittest.TestCase):
             resolve_transfer_incident(updated, "trn-repl-2")
         with self.assertRaises(DomainError):
             transition_incident_to_cancelled(cancelled, "bank_return")
+
+    def test_kit9_virtual_visa_card_mcc_cap_and_single_use(self):
+        mandate = VirtualCardMandate(
+            card_id="visa-vc-1",
+            obligation_id="obl-usd-1",
+            supplier_name="Shenzhen Precision PCB Ltd.",
+            limit=Money(450_00, "USD"),
+            allowed_mcc="5045",
+        )
+        with self.assertRaises(DomainError):
+            authorize_virtual_card_charge(mandate, 450_00, "5045")
+        active = issue_virtual_visa_card(mandate)
+        self.assertEqual(active.status, CardMandateStatus.ACTIVE)
+        wrong_mcc = authorize_virtual_card_charge(active, 450_00, "5812")
+        self.assertEqual(wrong_mcc.last_verdict, "DECLINED_MCC_MISMATCH")
+        over_cap = authorize_virtual_card_charge(active, 460_00, "5045")
+        self.assertEqual(over_cap.last_verdict, "DECLINED_OVER_LIMIT")
+        approved = authorize_virtual_card_charge(active, 450_00, "5045")
+        self.assertEqual(approved.status, CardMandateStatus.USED)
+        self.assertEqual(approved.last_verdict, "APPROVED_SINGLE_USE")
+        self.assertEqual(approved.rebate_earned_cents, 675)
+        reused = authorize_virtual_card_charge(approved, 100_00, "5045")
+        self.assertEqual(reused.last_verdict, "DECLINED_SINGLE_USE_EXHAUSTED")
 
 
 class EvaluatorTest(unittest.TestCase):

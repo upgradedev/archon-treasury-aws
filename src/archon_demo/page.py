@@ -6,6 +6,8 @@ Implements the Principal Frontend Architect / Figma-to-Code specification:
 - Flat Enterprise Styling: strict 1px slate-200 borders, geometric 4px-6px radii.
 - Tabular-nums & font-mono vertical alignment on all financial figures & digests.
 - Global Command Palette (Ctrl+K / Meta+K) and Multi-Company Entity Switcher.
+- Complete Kit 1 (Adaptive Treasury), Kit 3 (Payment Ops Incident Commander),
+  Kit 9 (Visa Virtual Commercial Card Spend Controls), and Kit 11 (Metal x402).
 - Semantic landmarks (<header>, <main>, <footer>), skip link, single <h1>,
   WCAG AAA high-contrast tokens, and aria-live="polite" status region.
 """
@@ -49,10 +51,11 @@ PAGE = (
     </div>
 
     <ul class="erp-nav-list">
-      <li><button type="button" class="nav-btn active" data-view="all"><span class="hide-when-collapsed">All Modules (Cockpit)</span><span class="badge badge-indigo">6</span></button></li>
+      <li><button type="button" class="nav-btn active" data-view="all"><span class="hide-when-collapsed">All Modules (Cockpit)</span><span class="badge badge-indigo">7</span></button></li>
       <li><button type="button" class="nav-btn" data-view="payouts"><span class="hide-when-collapsed">Supplier Payouts (Kit 1)</span><span class="badge badge-neutral">4</span></button></li>
       <li><button type="button" class="nav-btn" data-view="audit"><span class="hide-when-collapsed">Completeness Audit</span><span class="badge badge-amber">21</span></button></li>
       <li><button type="button" class="nav-btn" data-view="incidents"><span class="hide-when-collapsed">Incident Ops (Kit 3)</span><span class="badge badge-err">SWIFT</span></button></li>
+      <li><button type="button" class="nav-btn" data-view="visa"><span class="hide-when-collapsed">Visa Cards (Kit 9)</span><span class="badge badge-indigo">VISA</span></button></li>
       <li><button type="button" class="nav-btn" data-view="metal"><span class="hide-when-collapsed">Metal x402 (Kit 11)</span><span class="badge badge-ok">USDZ</span></button></li>
       <li><button type="button" class="nav-btn" data-view="evaluator"><span class="hide-when-collapsed">Bedrock Evaluator</span><span class="badge badge-indigo">AI</span></button></li>
     </ul>
@@ -71,6 +74,8 @@ PAGE = (
         <p class="lede">Archon Treasury recalculates Airwallex FX and supplier payouts when a deposit lands, invalidating stale approvals so cross-border teams never breach their cash reserve floor.</p>
       </div>
       <div class="topnav-controls">
+        <span id="roi-strip" class="badge badge-ok font-mono">Protected: USD 2,450.00 &middot; Engine: 1ms</span>
+        <a class="cta" href="/api/audit-export.csv" download="archon-treasury-audit.csv">Export Audit CSV</a>
         <button type="button" class="cmdk-trigger" id="cmdk-open" aria-label="Open command menu (Ctrl+K)">
           <span>Quick Command &amp; Search...</span>
           <span class="kbd">Ctrl+K</span>
@@ -80,16 +85,17 @@ PAGE = (
 
     <div class="quick-bar" role="region" aria-label="Guided 60-second judge flow">
       <span class="quick-label">Guided 60s Flow:</span>
-      <a class="cta" href="#obl-h">1. Approve USD &amp; EUR Payouts</a>
+      <button type="button" class="primary" data-act="quick-approve-both">1. Approve USD &amp; EUR Payouts</button>
       <button type="button" data-act="quick-eur-deposit">2. Land EUR 500.00 Webhook</button>
       <button type="button" data-act="quick-usd-deposit">3. Land USD 200.00 Floor Recovery</button>
       <button type="button" data-act="ai-match">4. Run Evaluator on Invoice</button>
-      <button type="button" data-act="metal-dispute">5. Resolve x402 Dispute Batch</button>
+      <button type="button" data-act="visa-issue">5. Issue Single-Use Visa Card</button>
+      <button type="button" data-act="metal-dispute">6. Resolve x402 Dispute Batch</button>
     </div>
 
     <div class="erp-scroll-area">
       <main id="main">
-        <div id="status" class="status-banner" role="status" aria-live="polite">Ready. Approve a USD payout and a EUR payout, then land a EUR 500.00 deposit to watch selective invalidation.</div>
+        <div id="status" class="status-banner" role="status" aria-live="polite">Ready. Click Step 1 to approve USD &amp; EUR payouts, then Step 2 to land a EUR 500.00 deposit and watch selective invalidation.</div>
 
         <section aria-labelledby="bal-h" data-module="payouts" style="background:transparent;border:0;padding:0;margin-bottom:0.5rem">
           <h2 id="bal-h" style="margin-bottom:0.5rem">Multi-Currency Liquidity &amp; Reserve Floors</h2>
@@ -133,6 +139,20 @@ PAGE = (
                 <span class="mono-sm">Aletheia Verification</span>
               </div>
               <div id="receipt-drawer"></div>
+            </section>
+
+            <section class="erp-panel" aria-labelledby="visa-h" data-module="visa">
+              <div class="panel-head">
+                <h2 id="visa-h">Kit 9: Visa Virtual Commercial Card &amp; MCC Spend Controls</h2>
+                <span class="mono-sm">Single-Use Mandate &middot; 150 bps Rebate</span>
+              </div>
+              <p class="muted-note" style="margin-bottom:0.6rem">Issues a single-use Virtual Visa commercial card for hardware suppliers with deterministic MCC lock (5045 Computers &amp; Peripherals), exact invoice cap, zero wire fee, and automatic post-charge closure.</p>
+              <div id="visa-box"></div>
+              <div class="btn-row" style="margin-top:0.55rem">
+                <button type="button" data-act="visa-issue">1. Issue Single-Use Visa (*4829)</button>
+                <button type="button" data-act="visa-wrong-mcc">2. Test Wrong MCC (5812 &rarr; Block)</button>
+                <button type="button" class="primary" data-act="visa-valid-charge">3. Authorize Valid PCB Charge (MCC 5045, USD 450.00)</button>
+              </div>
             </section>
 
             <section class="erp-panel" aria-labelledby="metal-h" data-module="metal">
@@ -193,12 +213,19 @@ PAGE = (
             <section class="erp-panel" aria-labelledby="ai-h" data-module="evaluator">
               <div class="panel-head">
                 <h2 id="ai-h">Evaluator Port: Unstructured Invoice Verification</h2>
-                <span class="mono-sm">Claude Haiku 4.5</span>
+                <span class="mono-sm">Claude Haiku 4.5 (Amazon Bedrock)</span>
               </div>
-              <p class="muted-note" style="margin-bottom:0.55rem">Extracts invoice fields (Claude Haiku on Amazon Bedrock when live, deterministic stand-in offline) and compares against obligation terms in integer cents.</p>
+              <p class="muted-note" style="margin-bottom:0.55rem">Edit the raw supplier invoice below or click a preset to invoke Claude Haiku 4.5 on Amazon Bedrock and verify against obligation terms in integer cents.</p>
+              <label for="custom-invoice-text">Raw Unstructured Supplier Invoice</label>
+              <textarea id="custom-invoice-text" class="font-mono" rows="5" style="width:100%;margin-bottom:0.5rem">INVOICE INV-2026-8841
+Supplier: Shenzhen Precision PCB Ltd.
+Counterparty: supplier-a
+Obligation: obl-usd-1
+Total due USD 450.00</textarea>
               <div class="btn-row">
-                <button type="button" class="primary" data-act="ai-match">Inspect Valid Invoice (USD 450.00)</button>
-                <button type="button" data-act="ai-tamper">Inspect Tampered Invoice (USD 495.00)</button>
+                <button type="button" class="primary" data-act="ai-custom">Inspect Custom Invoice Text (Live Bedrock)</button>
+                <button type="button" data-act="ai-match">Preset: Valid (450.00)</button>
+                <button type="button" data-act="ai-tamper">Preset: Tampered (495.00)</button>
               </div>
               <div id="ai-box"></div>
             </section>
@@ -240,7 +267,7 @@ PAGE = (
 <div class="cmdk-backdrop" id="cmdk-modal" role="dialog" aria-modal="true" aria-label="Global Command Menu">
   <div class="cmdk-dialog">
     <div class="cmdk-head">
-      <input type="search" id="cmdk-input" placeholder="Type a command or search obligations (e.g. EUR, Bedrock, x402, SWIFT)..." aria-label="Search commands">
+      <input type="search" id="cmdk-input" placeholder="Type a command or search obligations (e.g. EUR, Bedrock, Visa, x402, SWIFT)..." aria-label="Search commands">
       <button type="button" id="cmdk-close">Esc</button>
     </div>
     <ul class="cmdk-list" id="cmdk-list"></ul>

@@ -8,7 +8,7 @@ obligations to fund, convert, defer, or escalate, and how to recover a failed
 transfer without paying twice.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from kerdon.approvals import derive_request_id
@@ -17,6 +17,7 @@ from kerdon.models import Obligation, ObligationStatus, TreasurySnapshot
 from kerdon.money import Money
 
 SWIFT_FEE_EUR_CENTS = 12_85
+VIRTUAL_VISA_REBATE_BPS = 150
 HIGH_CONFIDENCE_THRESHOLD_BPS = 8000
 HIGH_CONFIDENCE_AUTO_LIMIT_CENTS = 2500_00
 LOW_CONFIDENCE_AUTO_LIMIT_CENTS = 0
@@ -297,3 +298,86 @@ def resolve_transfer_incident(
         )
         return IncidentDecision.REPLACE, updated
     return IncidentDecision.ESCALATE, incident
+
+
+class CardMandateStatus(str, Enum):
+    READY = "READY"
+    ACTIVE = "ACTIVE"
+    USED = "USED"
+
+
+@dataclass(frozen=True)
+class VirtualCardMandate:
+    card_id: str
+    obligation_id: str
+    supplier_name: str
+    limit: Money
+    allowed_mcc: str
+    single_use: bool = True
+    status: CardMandateStatus = CardMandateStatus.READY
+    card_last4: str = "4829"
+    last_verdict: str | None = None
+    last_reason: str | None = None
+    rebate_earned_cents: int = 0
+
+
+def issue_virtual_visa_card(mandate: VirtualCardMandate) -> VirtualCardMandate:
+    """Kit 9 (Visa Award Track): issue a single-use virtual Visa card with MCC & amount lock."""
+    return replace(
+        mandate,
+        status=CardMandateStatus.ACTIVE,
+        last_verdict="ISSUED",
+        last_reason=(
+            f"Single-use Visa virtual card *{mandate.card_last4} issued for "
+            f"{mandate.limit.spoken()} locked to MCC {mandate.allowed_mcc} (0 wire fee)."
+        ),
+    )
+
+
+def authorize_virtual_card_charge(
+    mandate: VirtualCardMandate,
+    charge_cents: int,
+    merchant_mcc: str,
+) -> VirtualCardMandate:
+    """Kit 9: deterministically enforce MCC lock, spend cap, and single-use auto-close."""
+    if not isinstance(charge_cents, int) or isinstance(charge_cents, bool) or charge_cents <= 0:
+        raise DomainError("card charge_cents must be a positive integer")
+    if mandate.status is CardMandateStatus.READY:
+        raise DomainError("issue the virtual Visa card before authorizing a supplier charge")
+    if mandate.status is CardMandateStatus.USED and mandate.single_use:
+        return replace(
+            mandate,
+            last_verdict="DECLINED_SINGLE_USE_EXHAUSTED",
+            last_reason="Blocked: single-use virtual Visa card is already exhausted and auto-closed.",
+        )
+    cleaned_mcc = (merchant_mcc or "").strip()
+    if cleaned_mcc != mandate.allowed_mcc:
+        return replace(
+            mandate,
+            last_verdict="DECLINED_MCC_MISMATCH",
+            last_reason=(
+                f"Blocked by Visa MCC spend control: merchant MCC {cleaned_mcc} "
+                f"differs from locked MCC {mandate.allowed_mcc}."
+            ),
+        )
+    if charge_cents > mandate.limit.amount_cents:
+        return replace(
+            mandate,
+            last_verdict="DECLINED_OVER_LIMIT",
+            last_reason=(
+                f"Blocked by Visa spend cap: charge {charge_cents} cents "
+                f"exceeds mandate limit {mandate.limit.amount_cents} cents."
+            ),
+        )
+    rebate = (charge_cents * VIRTUAL_VISA_REBATE_BPS) // 10_000
+    return replace(
+        mandate,
+        status=CardMandateStatus.USED,
+        last_verdict="APPROVED_SINGLE_USE",
+        last_reason=(
+            f"Approved {Money(charge_cents, mandate.limit.currency).spoken()} at MCC {cleaned_mcc}; "
+            f"card auto-closed after single use (+{rebate} cents interchange rebate)."
+        ),
+        rebate_earned_cents=rebate,
+    )
+

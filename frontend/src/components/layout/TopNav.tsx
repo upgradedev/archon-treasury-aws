@@ -16,6 +16,13 @@ export const TopNav: React.FC = () => {
         </p>
       </div>
       <div className="flex items-center gap-2">
+        <a
+          href="/api/audit-export.csv"
+          download="archon-treasury-audit.csv"
+          className="inline-flex items-center bg-indigo-700 text-white px-2.5 py-1.5 rounded-sm text-xs font-semibold hover:bg-indigo-800 transition-colors duration-150"
+        >
+          Export Audit CSV
+        </a>
         <button
           type="button"
           onClick={() => setCommandMenuOpen(true)}

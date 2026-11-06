@@ -21,6 +21,7 @@ MAX_BODY_BYTES = 16384
 
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
 }
@@ -69,6 +70,8 @@ def dispatch_http(
             return 204, "", "image/x-icon", None
         if read_method and path == "/api/state":
             return 200, service.state(), "application/json", set_cookie
+        if read_method and path == "/api/audit-export.csv":
+            return 200, ("" if method == "HEAD" else service.export_audit_csv()), "text/csv; charset=utf-8", set_cookie
         if method == "POST" and path.startswith("/api/approve/"):
             return 200, service.approve(path.rsplit("/", 1)[1]), "application/json", set_cookie
         if method == "POST" and path.startswith("/api/execute/"):
@@ -117,7 +120,15 @@ def dispatch_http(
             payload = _parse_json_object(raw)
             oid = str(payload.get("obligation_id", "obl-usd-1"))
             mode = str(payload.get("mode", "matching"))
-            return 200, service.inspect_invoice(oid, mode), "application/json", set_cookie
+            custom_text = str(payload["custom_text"]) if payload.get("custom_text") else None
+            return 200, service.inspect_invoice(oid, mode, custom_text), "application/json", set_cookie
+        if method == "POST" and path == "/api/visa-issue":
+            return 200, service.issue_visa_card(), "application/json", set_cookie
+        if method == "POST" and path == "/api/visa-charge":
+            payload = _parse_json_object(raw)
+            charge_cents = int(payload.get("charge_cents", 450_00))
+            mcc = str(payload.get("merchant_mcc", "5045"))
+            return 200, service.charge_visa_card(charge_cents, mcc), "application/json", set_cookie
         if method == "POST" and path == "/api/incident-fail":
             payload = _parse_json_object(raw)
             ftype = str(payload.get("failure_type", "bank_return"))

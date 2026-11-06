@@ -31,8 +31,50 @@ export interface CompletenessFinding {
   message: string;
 }
 
+export interface VisaMandateState {
+  card_id: string;
+  obligation_id: string;
+  supplier_name: string;
+  limit: string;
+  allowed_mcc: string;
+  single_use: boolean;
+  status: string;
+  card_last4: string;
+  last_verdict: string | null;
+  last_reason: string | null;
+  rebate_earned: string;
+}
+
+export interface IncidentState {
+  incident_id: string;
+  obligation_id: string;
+  original_transfer_id: string;
+  original_request_id: string;
+  amount: string;
+  rail: string;
+  status: string;
+  failure_type: string | null;
+  replacement_transfer_id: string | null;
+  replacement_request_id: string | null;
+  swift_fees_budgeted: string;
+}
+
+export interface MetalAgentRow {
+  agent_id: string;
+  weight_percent: number;
+  allowance: string;
+  price_per_call: string;
+  max_price_per_call_cents: number | null;
+  call_cap: number;
+  calls_used: number;
+  spent: string;
+}
+
 export interface TreasurySnapshot {
   balances: ReadonlyArray<WalletBalance>;
   obligations: ReadonlyArray<SupplierObligation>;
   findings: ReadonlyArray<CompletenessFinding>;
+  visa_mandate?: VisaMandateState;
+  incident?: IncidentState;
+  metal_agents?: ReadonlyArray<MetalAgentRow>;
 }

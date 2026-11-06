@@ -474,7 +474,7 @@ ERP_STYLES = """<style>
   .badge-indigo { background: var(--indigo-50); color: var(--indigo-700); border-color: var(--indigo-200); }
   .badge-neutral { background: var(--slate-100); color: var(--slate-600); border-color: var(--slate-300); }
 
-  button, select, input {
+  button, select, input, textarea {
     font: inherit;
     font-size: 0.79rem;
     padding: 0.32rem 0.6rem;

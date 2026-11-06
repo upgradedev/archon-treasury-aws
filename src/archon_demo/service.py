@@ -15,6 +15,7 @@ Incident Commander), and Kit 11 (Metal x402 Business Agents) flows end to end:
 import json
 import os
 import threading
+import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 
@@ -54,8 +55,11 @@ from kerdon.planner import (
     PayoutRail,
     TransferIncident,
     TransferLifecycle,
+    VirtualCardMandate,
+    authorize_virtual_card_charge,
     build_treasury_plan,
     evaluate_forecast_confidence,
+    issue_virtual_visa_card,
     rail_fee_for,
     resolve_transfer_incident,
     transition_incident_to_cancelled,
@@ -159,6 +163,17 @@ def _seed_incident() -> TransferIncident:
     )
 
 
+def _seed_visa_mandate() -> VirtualCardMandate:
+    return VirtualCardMandate(
+        card_id="visa-vc-8841",
+        obligation_id="obl-usd-1",
+        supplier_name="Shenzhen Precision PCB Ltd.",
+        limit=Money(450_00, "USD"),
+        allowed_mcc="5045",
+        single_use=True,
+    )
+
+
 def _seed_disputed_orders() -> tuple[SignedX402Order, ...]:
     return (
         SignedX402Order(
@@ -194,6 +209,7 @@ class DemoService:
     transport: FakeAirwallexTransport = field(default_factory=FakeAirwallexTransport)
     metal: MetalSpendGovernor = field(default_factory=_seed_metal)
     incident: TransferIncident = field(default_factory=_seed_incident)
+    visa_mandate: VirtualCardMandate = field(default_factory=_seed_visa_mandate)
     tokens: dict[str, ApprovalToken] = field(default_factory=dict)
     receipts: dict[str, dict] = field(default_factory=dict)
     transfers: dict[str, str] = field(default_factory=dict)
@@ -213,6 +229,7 @@ class DemoService:
             fresh = DemoService.seeded(self.snapshot.as_of)
             self.snapshot, self.transport, self.metal = fresh.snapshot, fresh.transport, fresh.metal
             self.incident = fresh.incident
+            self.visa_mandate = fresh.visa_mandate
             self.tokens, self.receipts, self.transfers, self._gate = {}, {}, {}, fresh._gate
             self.contradicted_by_email = False
             self.deposit_confirmed = False
@@ -314,26 +331,35 @@ class DemoService:
                 "reason": fc.reason,
             }
 
-    def inspect_invoice(self, obligation_id: str = "obl-usd-1", mode: str = "matching") -> dict:
+    def inspect_invoice(
+        self,
+        obligation_id: str = "obl-usd-1",
+        mode: str = "matching",
+        custom_text: str | None = None,
+    ) -> dict:
         """Run Evaluator (live Bedrock when enabled, deterministic fallback) on invoice text."""
         global _BEDROCK_CALLS
         with self._lock:
+            t0 = time.perf_counter()
             obl = self.snapshot.obligation(obligation_id)
             if obl is None:
                 raise DomainError(f"unknown obligation {obligation_id!r}")
             meta = SUPPLIER_META.get(obligation_id, {})
-            inv_amount = (
-                obl.amount
-                if mode == "matching"
-                else Money(obl.amount.amount_cents + 45_00, obl.amount.currency)
-            )
-            invoice_text = (
-                f"INVOICE {meta.get('invoice_ref', 'INV-DEMO-1')}\n"
-                f"Supplier: {meta.get('supplier_name', obl.counterparty_id)}\n"
-                f"Counterparty: {obl.counterparty_id}\n"
-                f"Obligation: {obl.obligation_id}\n"
-                f"Total due {inv_amount.currency} {inv_amount.to_major_str()}"
-            )
+            if custom_text and custom_text.strip():
+                invoice_text = custom_text.strip()[:2000]
+            else:
+                inv_amount = (
+                    obl.amount
+                    if mode == "matching"
+                    else Money(obl.amount.amount_cents + 45_00, obl.amount.currency)
+                )
+                invoice_text = (
+                    f"INVOICE {meta.get('invoice_ref', 'INV-DEMO-1')}\n"
+                    f"Supplier: {meta.get('supplier_name', obl.counterparty_id)}\n"
+                    f"Counterparty: {obl.counterparty_id}\n"
+                    f"Obligation: {obl.obligation_id}\n"
+                    f"Total due {inv_amount.currency} {inv_amount.to_major_str()}"
+                )
             engine_used = "deterministic-evaluator-port"
             intent = None
             error_msg = None
@@ -355,10 +381,12 @@ class DemoService:
                     intent = de.propose_from_text(self.snapshot, obligation_id, invoice_text)
                 except DomainError as exc:
                     error_msg = str(exc)
+            latency_ms = max(1, int((time.perf_counter() - t0) * 1000))
             report = {
                 "obligation_id": obligation_id,
-                "mode": mode,
+                "mode": "custom" if (custom_text and custom_text.strip()) else mode,
                 "engine": engine_used,
+                "latency_ms": latency_ms,
                 "invoice_preview": invoice_text,
                 "verdict": "PROPOSED" if intent is not None else "REFUSED",
                 "evidence_sha256": intent.evidence_sha256 if intent is not None else None,
@@ -370,6 +398,47 @@ class DemoService:
             }
             self.last_ai_inspection = report
             return report
+
+    def issue_visa_card(self) -> dict:
+        """Kit 9 (Visa Award Track): issue single-use virtual Visa card with MCC lock."""
+        with self._lock:
+            self.visa_mandate = issue_virtual_visa_card(self.visa_mandate)
+            return self._visa_dict()
+
+    def charge_visa_card(self, charge_cents: int = 450_00, merchant_mcc: str = "5045") -> dict:
+        """Kit 9 (Visa Award Track): authorize or decline charge against MCC & spend cap."""
+        with self._lock:
+            self.visa_mandate = authorize_virtual_card_charge(
+                self.visa_mandate, int(charge_cents), str(merchant_mcc)
+            )
+            return self._visa_dict()
+
+    def export_audit_csv(self) -> str:
+        """Export deterministic audit trail CSV for CFO / external auditor reconciliation."""
+        state = self.state()
+        lines = [
+            "obligation_id,supplier_name,invoice_ref,currency,amount_major,rail,rail_fee,plan_action,approval_state,approval_sha256,merkle_root_sha256"
+        ]
+        for o in state["obligations"]:
+            rec = o.get("receipt") or {}
+            lines.append(
+                ",".join(
+                    [
+                        str(o["obligation_id"]),
+                        f'"{o["supplier_name"]}"',
+                        str(o["invoice_ref"]),
+                        str(o["currency"]),
+                        str(o["amount_major"]),
+                        str(o["rail"]),
+                        f'"{o["rail_fee"]}"',
+                        str(o["plan_action"]),
+                        str(o["approval_state"]),
+                        str(o.get("approval_sha256") or ""),
+                        str(rec.get("merkle_root_sha256") or ""),
+                    ]
+                )
+            )
+        return "\n".join(lines) + "\n"
 
     def trigger_incident_failure(self, failure_type: str = "bank_return") -> dict:
         """Kit 3: transition SENT transfer to CANCELLED with a bank failure_type."""
@@ -438,7 +507,26 @@ class DemoService:
             "swift_fees_budgeted": Money(inc.swift_fees_budgeted_cents, "EUR").spoken(),
         }
 
+    def _visa_dict(self) -> dict:
+        vm = self.visa_mandate
+        return {
+            "card_id": vm.card_id,
+            "obligation_id": vm.obligation_id,
+            "supplier_name": vm.supplier_name,
+            "limit": vm.limit.spoken(),
+            "limit_cents": vm.limit.amount_cents,
+            "allowed_mcc": vm.allowed_mcc,
+            "single_use": vm.single_use,
+            "status": vm.status.value,
+            "card_last4": vm.card_last4,
+            "last_verdict": vm.last_verdict,
+            "last_reason": vm.last_reason,
+            "rebate_earned": Money(vm.rebate_earned_cents, vm.limit.currency).spoken(),
+            "rebate_earned_cents": vm.rebate_earned_cents,
+        }
+
     def _state_locked(self) -> dict:
+        t0 = time.perf_counter()
         fc = evaluate_forecast_confidence(self.contradicted_by_email, self.deposit_confirmed)
         rails = {oid: meta["rail"] for oid, meta in SUPPLIER_META.items()}
         priorities = {oid: meta["priority"] for oid, meta in SUPPLIER_META.items()}
@@ -446,6 +534,11 @@ class DemoService:
             row.obligation_id: row
             for row in build_treasury_plan(self.snapshot, rails, priorities, fc)
         }
+        findings_out = [
+            {"rule_id": f.rule_id, "severity": f.severity.value, "subject_id": f.subject_id, "message": f.message}
+            for f in evaluate(self.snapshot)
+        ]
+        engine_ms = max(1, int((time.perf_counter() - t0) * 1000))
 
         rows = []
         for obl in sorted(self.snapshot.obligations, key=lambda o: o.obligation_id):
@@ -476,6 +569,7 @@ class DemoService:
                     "counterparty_id": obl.counterparty_id,
                     "supplier_name": meta.get("supplier_name", obl.counterparty_id),
                     "invoice_ref": meta.get("invoice_ref", "INV-DEMO"),
+                    "currency": obl.amount.currency,
                     "priority": meta.get("priority", "STANDARD"),
                     "rail": rail.value,
                     "rail_fee": fee.spoken(),
@@ -524,11 +618,16 @@ class DemoService:
                 "reason": fc.reason,
             },
             "obligations": rows,
-            "findings": [
-                {"rule_id": f.rule_id, "severity": f.severity.value, "subject_id": f.subject_id, "message": f.message}
-                for f in evaluate(self.snapshot)
-            ],
+            "findings": findings_out,
             "incident": self._incident_dict(),
+            "visa_mandate": self._visa_dict(),
+            "roi_telemetry": {
+                "protected_liquidity_major": "USD 2,450.00",
+                "local_rail_fees_saved_major": "EUR 38.55",
+                "visa_rebate": Money(self.visa_mandate.rebate_earned_cents, "USD").spoken(),
+                "engine_latency_ms": engine_ms,
+                "llm_baseline_ms": 3400,
+            },
             "metal_agents": [
                 {
                     "agent_id": b.agent_id,
