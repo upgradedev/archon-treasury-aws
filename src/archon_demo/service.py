@@ -22,6 +22,8 @@ from datetime import datetime, timedelta, timezone
 from adapters.airwallex_client import AirwallexClient, FakeAirwallexTransport, parse_major_amount
 from adapters.bedrock_evaluator import BedrockEvaluator
 from adapters.evaluator import DeterministicEvaluator
+from adapters.fx_rates_client import get_fx_rates
+from adapters.live_transport import AirwallexConfig, HttpAirwallexTransport, live_credentials_present
 from adapters.metal_client import (
     AgentBudget,
     FakeMetalTransport,
@@ -203,10 +205,16 @@ def _seed_disputed_orders() -> tuple[SignedX402Order, ...]:
     )
 
 
+def _default_transport():
+    if live_credentials_present():
+        return HttpAirwallexTransport(AirwallexConfig.from_env())
+    return FakeAirwallexTransport()
+
+
 @dataclass(slots=True)
 class DemoService:
     snapshot: TreasurySnapshot
-    transport: FakeAirwallexTransport = field(default_factory=FakeAirwallexTransport)
+    transport: object = field(default_factory=_default_transport)
     metal: MetalSpendGovernor = field(default_factory=_seed_metal)
     incident: TransferIncident = field(default_factory=_seed_incident)
     visa_mandate: VirtualCardMandate = field(default_factory=_seed_visa_mandate)
@@ -645,8 +653,13 @@ class DemoService:
             ],
             "last_dispute_report": self.last_dispute_report,
             "last_ai_inspection": self.last_ai_inspection,
-            "transfer_count": self.transport.transfer_count,
-            "mode": "synthetic-demo-fake-transport",
+            "fx_rates": get_fx_rates(),
+            "transfer_count": getattr(self.transport, "transfer_count", len(self.transfers)),
+            "mode": (
+                "live-airwallex-sandbox"
+                if live_credentials_present()
+                else "synthetic-demo-fake-transport"
+            ),
         }
 
     def _obligation(self, obligation_id: str) -> Obligation:

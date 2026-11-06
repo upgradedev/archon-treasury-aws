@@ -69,6 +69,8 @@ def main(base: str) -> int:
     status, _h, body = call(base, "GET", "/api/state")
     state = json.loads(body) if status == 200 else {}
     check("exactly one transfer", state.get("transfer_count") == 1, f"count={state.get('transfer_count')}")
+    fx = state.get("fx_rates") or {}
+    check("live ECB FX reference rates", bool(fx.get("eur_usd") and fx.get("eur_gbp") and fx.get("gbp_usd")), f"source={fx.get('source')} eur_usd={fx.get('eur_usd')}")
     rules = {f["rule_id"] for f in state.get("findings", [])}
     check("seeded findings R01, R02, R09, and live R18 visible", {"R01", "R02", "R09", "R18"} <= rules, f"rules={sorted(rules)}")
     # Recovery: re-approve the EUR payout on the new evidence, then it pays.

@@ -6,7 +6,8 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from adapters.airwallex_client import AdapterError, AirwallexClient, DuplicateRequestError
-from adapters.live_transport import AirwallexConfig, HttpAirwallexTransport
+from adapters.fx_rates_client import get_fx_rates, reset_fx_cache
+from adapters.live_transport import AirwallexConfig, HttpAirwallexTransport, live_credentials_present
 from fixtures import clean_snapshot, obligation
 from kerdon.approvals import ApprovalIntent
 
@@ -24,6 +25,11 @@ class StubAirwallex(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path == "/fx-latest":
+            return self._reply(200, {"date": "2026-11-06", "rates": {"USD": 1.0912, "GBP": 0.8415}})
+        return self._reply(500, {"error": "failed"})
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
@@ -76,6 +82,30 @@ class LiveTransportTest(unittest.TestCase):
         intent = ApprovalIntent.from_snapshot(clean_snapshot(), obligation(), "net-14")
         with self.assertRaises(DuplicateRequestError):
             self._client().execute(intent, "req-dup")
+
+    def test_live_credentials_present(self):
+        self.assertFalse(live_credentials_present({}))
+        self.assertFalse(live_credentials_present({"AWX_CLIENT_ID": "cid"}))
+        self.assertTrue(live_credentials_present({"AWX_CLIENT_ID": "cid", "AWX_API_KEY": "key"}))
+
+    def test_get_fx_rates_and_cache(self):
+        reset_fx_cache()
+        offline = get_fx_rates(allow_network=False)
+        self.assertEqual(offline["source"], "ecb-reference-rates-pinned-offline")
+        self.assertEqual(offline["eur_usd"], "1.0845")
+
+        # Network error falls back cleanly
+        failed = get_fx_rates(allow_network=True, endpoint=f"http://127.0.0.1:{self.port}/fx-broken")
+        self.assertEqual(failed["source"], "ecb-reference-rates-pinned-offline")
+
+        # Live HTTP fetch succeeds and caches
+        live = get_fx_rates(allow_network=True, endpoint=f"http://127.0.0.1:{self.port}/fx-latest")
+        self.assertEqual(live["source"], "ecb-reference-rates-live")
+        self.assertEqual(live["eur_usd"], "1.0912")
+        self.assertEqual(live["eur_gbp"], "0.8415")
+        cached = get_fx_rates(allow_network=False)
+        self.assertEqual(cached["eur_usd"], "1.0912")
+        reset_fx_cache()
 
 
 if __name__ == "__main__":

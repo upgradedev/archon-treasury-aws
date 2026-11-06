@@ -122,12 +122,14 @@ function render(s) {
     const fcEl = document.getElementById('forecast-box');
     const badgeCls = fc.contradicted_by_email ? 'badge-err' : 'badge-ok';
     const badgeTxt = fc.contradicted_by_email ? 'LOW CONFIDENCE (EMAIL CONTRADICTION)' : 'HIGH CONFIDENCE (VERIFIED)';
+    const fxLine = s.fx_rates ? `<div class="mono-sm" style="margin-top:0.3rem">Live FX (${esc(s.fx_rates.source)} &middot; ${esc(s.fx_rates.as_of_date)}): EUR/USD <strong>${esc(s.fx_rates.eur_usd)}</strong> &middot; EUR/GBP <strong>${esc(s.fx_rates.eur_gbp)}</strong> &middot; GBP/USD <strong>${esc(s.fx_rates.gbp_usd)}</strong></div>` : '';
     fcEl.innerHTML = `
       <div class="forecast-row">
         <div>
           <span class="badge ${badgeCls}">${badgeTxt}</span>
           <strong class="font-mono" style="margin-left:0.5rem">Confidence: ${fc.confidence_pct}% (${fc.confidence_bps} bps)</strong>
           <span class="mono-sm" style="margin-left:0.5rem">Autonomous FX Limit: ${esc(fc.autonomous_limit)}</span>
+          ${fxLine}
         </div>
         <div class="btn-row">
           <button type="button" data-act="email-contradict">Simulate Contradicting Customer Email</button>

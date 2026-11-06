@@ -85,3 +85,9 @@ class HttpAirwallexTransport:
     def __call__(self, method: str, path: str, payload: dict | None) -> dict:
         token = self._authenticate()
         return self._raw(method, path, payload, {"Authorization": f"Bearer {token}"})
+
+
+def live_credentials_present(env: dict | None = None) -> bool:
+    source = os.environ if env is None else env
+    return bool(source.get("AWX_CLIENT_ID", "").strip() and source.get("AWX_API_KEY", "").strip())
+
