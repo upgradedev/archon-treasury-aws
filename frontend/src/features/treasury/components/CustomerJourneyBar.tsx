@@ -1,13 +1,14 @@
 import React from 'react';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
+import { ViewId } from '../../../context/navigation';
 import { TreasurySnapshot } from '../types';
 
 interface Props {
   snapshot: TreasurySnapshot;
   unavailable: boolean;
   onAction: (name: string, path: string, body?: Record<string, unknown>) => void;
-  onNavigate: (moduleId: string) => void;
+  onNavigate: (moduleId: ViewId) => void;
 }
 
 export const CustomerJourneyBar: React.FC<Props> = ({
