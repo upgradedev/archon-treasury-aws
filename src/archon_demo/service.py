@@ -664,6 +664,7 @@ class DemoService:
                     "requires_human_approval": plan_row.requires_human_approval if plan_row else True,
                     "approval_state": approval_state,
                     "approval_sha256": token.sha256 if token else None,
+                    "transfer_id": self.transfers.get(obl.obligation_id),
                     "action_reason": reason,
                     "receipt": self.receipts.get(obl.obligation_id),
                 }

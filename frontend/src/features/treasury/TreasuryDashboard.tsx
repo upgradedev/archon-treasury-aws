@@ -8,6 +8,7 @@ import { CompletenessAlerts } from './CompletenessAlerts';
 import { KpiGrid } from './KpiGrid';
 import { ObligationsTable } from './ObligationsTable';
 import { ConfirmActionState, ConfirmDialog } from './components/ConfirmDialog';
+import { CustomerJourneyBar } from './components/CustomerJourneyBar';
 import { OperatorAuthBar } from './components/OperatorAuthBar';
 import { ReceiptInspector } from './components/ReceiptInspector';
 import { requestJson, setCsrfToken } from './api';
@@ -362,64 +363,72 @@ export const TreasuryDashboard: React.FC = () => {
       {!loading && !loadError && (
         <>
           {activeModule === 'all' && (
-            <div className="workspace-grid">
-              <div className="workspace-main">
-                <KpiGrid balances={balances} />
-                <section>{payoutTable}</section>
-              </div>
-              <aside className="workspace-side">
-                <section className="callout">
-                  <h3>
-                    {invalidated.length ? 'Evidence changed' : 'Approval integrity'}
-                  </h3>
-                  {invalidated.length ? (
-                    invalidated.map((o) => (
-                      <div key={o.obligation_id}>
-                        <p>
-                          {o.supplier_name}
-                          <br />
-                          {o.action_reason}
-                        </p>
-                        <Button
-                          onClick={() => {
-                            setActiveModule('approvals');
-                            setSearch(o.obligation_id);
-                          }}
-                        >
-                          Review approval →
-                        </Button>
-                      </div>
-                    ))
-                  ) : (
-                    <p>No invalidated approvals in the current state.</p>
-                  )}
-                </section>
-                <section>
-                  <div className="section-heading">
-                    <h2>Completeness</h2>
-                    <Badge intent={blockers.length ? 'critical' : 'success'}>
-                      {blockers.length} blockers
-                    </Badge>
-                  </div>
-                  <CompletenessAlerts findings={snapshot.findings.slice(0, 3)} />
-                  <Button variant="ghost" onClick={() => setActiveModule('audit')}>
-                    All findings →
-                  </Button>
-                </section>
-                {snapshot.forecast && (
+            <>
+              <CustomerJourneyBar
+                snapshot={snapshot}
+                unavailable={unavailable}
+                onAction={requestAction}
+                onNavigate={(mod) => setActiveModule(mod)}
+              />
+              <div className="workspace-grid">
+                <div className="workspace-main">
+                  <KpiGrid balances={balances} />
+                  <section>{payoutTable}</section>
+                </div>
+                <aside className="workspace-side">
+                  <section className="callout">
+                    <h3>
+                      {invalidated.length ? 'Evidence changed' : 'Approval integrity'}
+                    </h3>
+                    {invalidated.length ? (
+                      invalidated.map((o) => (
+                        <div key={o.obligation_id}>
+                          <p>
+                            {o.supplier_name}
+                            <br />
+                            {o.action_reason}
+                          </p>
+                          <Button
+                            onClick={() => {
+                              setActiveModule('approvals');
+                              setSearch(o.obligation_id);
+                            }}
+                          >
+                            Review approval →
+                          </Button>
+                        </div>
+                      ))
+                    ) : (
+                      <p>No invalidated approvals in the current state.</p>
+                    )}
+                  </section>
                   <section>
                     <div className="section-heading">
-                      <h2>Forecast confidence</h2>
-                      <span className="money">{snapshot.forecast.confidence_pct}%</span>
+                      <h2>Completeness</h2>
+                      <Badge intent={blockers.length ? 'critical' : 'success'}>
+                        {blockers.length} blockers
+                      </Badge>
                     </div>
-                    <p className="muted">{snapshot.forecast.reason}</p>
-                    <span className="money">
-                      Limit {snapshot.forecast.autonomous_limit_major}
-                    </span>
+                    <CompletenessAlerts findings={snapshot.findings.slice(0, 3)} />
+                    <Button variant="ghost" onClick={() => setActiveModule('audit')}>
+                      All findings →
+                    </Button>
                   </section>
-                )}
-              </aside>
-            </div>
+                  {snapshot.forecast && (
+                    <section>
+                      <div className="section-heading">
+                        <h2>Forecast confidence</h2>
+                        <span className="money">{snapshot.forecast.confidence_pct}%</span>
+                      </div>
+                      <p className="muted">{snapshot.forecast.reason}</p>
+                      <span className="money">
+                        Limit {snapshot.forecast.autonomous_limit_major}
+                      </span>
+                    </section>
+                  )}
+                </aside>
+              </div>
+            </>
           )}
 
           {(activeModule === 'payouts' || activeModule === 'approvals') && (
@@ -590,8 +599,9 @@ export const TreasuryDashboard: React.FC = () => {
                           <Badge intent="success">{d.reference}</Badge>
                         </div>
                         <p className="muted">
-                          {d.payer_name} · Account {d.account_id} · Invalidated:{' '}
-                          {d.invalidated.length ? d.invalidated.join(', ') : 'none'}
+                          {d.payer_name} · Account {d.account_id}
+                          {d.awx_deposit_id ? ` · Airwallex Deposit ID: ${d.awx_deposit_id}` : ''} ·
+                          Invalidated: {d.invalidated.length ? d.invalidated.join(', ') : 'none'}
                         </p>
                       </div>
                     ))}
@@ -698,6 +708,7 @@ export const TreasuryDashboard: React.FC = () => {
                         <div className="section-heading">
                           <span className="money">
                             {q.quote_id}: {q.sell_amount_major} → {q.buy_amount_major}
+                            {q.awx_quote_id ? ` (Airwallex: ${q.awx_quote_id})` : ''}
                           </span>
                           <Badge intent={q.expired ? 'critical' : 'success'}>
                             {q.expired ? 'EXPIRED' : 'ACTIVE'}
@@ -729,6 +740,9 @@ export const TreasuryDashboard: React.FC = () => {
                       <div key={c.conversion_id} className="list-row">
                         <span className="money">
                           {c.conversion_id}: Sold {c.sold_major} → Bought {c.bought_major}
+                          {c.awx_short_reference_id
+                            ? ` · Airwallex Ref: ${c.awx_short_reference_id}`
+                            : ''}
                         </span>
                       </div>
                     ))}

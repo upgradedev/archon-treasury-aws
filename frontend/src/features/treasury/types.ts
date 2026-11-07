@@ -23,6 +23,7 @@ export interface SupplierObligation {
   plan_rationale: string;
   approval_state: 'VALID' | 'INVALIDATED' | 'PAID' | 'NOT_APPROVED';
   approval_sha256: string | null;
+  transfer_id?: string | null;
   action_reason: string;
   receipt?: Record<string, unknown> | null;
 }
@@ -89,6 +90,7 @@ export interface SessionInfo {
 
 export interface DepositHistoryRow {
   deposit_id: string;
+  awx_deposit_id?: string | null;
   event_id: string;
   account_id: string;
   currency: string;
@@ -103,6 +105,7 @@ export interface DepositHistoryRow {
 
 export interface FxQuoteRow {
   quote_id: string;
+  awx_quote_id?: string | null;
   from_currency: string;
   to_currency: string;
   sell_amount: string;
@@ -116,6 +119,7 @@ export interface FxQuoteRow {
 
 export interface FxConversionRow {
   conversion_id: string;
+  awx_short_reference_id?: string | null;
   quote_id: string;
   from_currency: string;
   to_currency: string;
@@ -163,6 +167,13 @@ export interface TreasurySnapshot {
   reconciliation?: ReconciliationReport;
   last_ai_inspection?: Record<string, unknown> | null;
   last_dispute_report?: Record<string, unknown> | null;
+  roi_telemetry?: {
+    protected_liquidity_major: string;
+    local_rail_fees_saved_major: string;
+    visa_rebate: string;
+    engine_latency_ms: number;
+    llm_baseline_ms: number;
+  };
   balances: ReadonlyArray<WalletBalance>;
   obligations: ReadonlyArray<SupplierObligation>;
   findings: ReadonlyArray<CompletenessFinding>;

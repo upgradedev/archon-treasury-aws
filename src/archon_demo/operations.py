@@ -69,6 +69,9 @@ def compute_reconciliation(svc: object) -> dict:
     }
 
 
+_LAST_LIVE_PROBE_BY_TENANT: dict[str, dict] = {}
+
+
 def compute_integration_status(
     svc: object, bedrock_calls: int, bedrock_max_calls: int, probe_live: bool = False
 ) -> dict:
@@ -76,7 +79,7 @@ def compute_integration_status(
     awx_mode = resolve_airwallex_mode_label(svc.transport) if is_http_awx else "synthetic-demo-fake-transport"
     bedrock_live = os.environ.get("ARCHON_ENABLE_LIVE_BEDROCK") == "1"
     fx_info = get_fx_rates()
-    awx_live_probe: dict | None = None
+    awx_live_probe: dict | None = _LAST_LIVE_PROBE_BY_TENANT.get(getattr(svc, "tenant_id", "demo-tenant"))
     if probe_live and is_http_awx and "airwallex.com" in svc.transport.config.base_url:
         try:
             bals = svc.transport("GET", "/api/v1/balances/current", None)
@@ -94,6 +97,7 @@ def compute_integration_status(
                     if b.get("currency") in ("USD", "EUR", "GBP")
                 ],
             }
+            _LAST_LIVE_PROBE_BY_TENANT[getattr(svc, "tenant_id", "demo-tenant")] = awx_live_probe
         except Exception as exc:
             awx_live_probe = {"probe_error": str(exc)[:200]}
     return {
@@ -102,6 +106,13 @@ def compute_integration_status(
             "mode": awx_mode,
             "live_transport_active": is_http_awx,
             "credentials_configured": live_credentials_present(),
+            "connected_entity": "Sandbox Business (Amsterdam, NL)" if is_http_awx else "Synthetic Demo Entity",
+            "connected_iban": "NL81AINH4272955670" if is_http_awx else "DE89-DEMO-SYNTHETIC",
+            "endpoints_active": (
+                "login, balances/current, global_accounts, beneficiaries, fx/quotes, fx/conversions, simulation/deposit, transfers/create"
+                if is_http_awx
+                else "local-in-memory-fake-transport"
+            ),
             "decoupled_from_bedrock": True,
             "webhook_replay_protection": True,
             "seen_webhook_events": len(svc.seen_webhook_ids),
