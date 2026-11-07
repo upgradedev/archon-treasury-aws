@@ -170,7 +170,7 @@ jobs:
             --region "$AWS_REGION"
           aws lambda update-function-configuration \
             --function-name "$LAMBDA_FUNCTION" \
-            --environment "Variables={DEPLOYED_SHA=${GITHUB_SHA},ARCHON_ENABLE_LIVE_BEDROCK=1,AWX_CLIENT_ID=${AWX_CLIENT_ID},AWX_API_KEY=${AWX_API_KEY}}" \
+            --environment "Variables={DEPLOYED_SHA=${GITHUB_SHA},ARCHON_SERVE_REACT_UI=1,ARCHON_ENABLE_LIVE_AIRWALLEX=1,ARCHON_ENABLE_LIVE_BEDROCK=1,AWX_CLIENT_ID=${AWX_CLIENT_ID},AWX_API_KEY=${AWX_API_KEY}}" \
             --region "$AWS_REGION"
           aws lambda wait function-updated \
             --function-name "$LAMBDA_FUNCTION" \

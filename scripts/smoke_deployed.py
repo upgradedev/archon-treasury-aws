@@ -46,7 +46,14 @@ def main(base: str) -> int:
     base = base.rstrip("/")
     status, headers, page = call(base, "GET", "/")
     check("page 200 anonymous", status == 200 and "Archon Treasury" in page, f"HTTP {status}")
-    check("erp shell & cmdk palette", "erp-shell" in page and "cmdk-modal" in page and "tabular-nums" in page)
+    if '<div id="root"></div>' in page:
+        st_leg, _hl, leg_page = call(base, "GET", "/legacy")
+        check(
+            "react spa at / & legacy cockpit at /legacy",
+            st_leg == 200 and "erp-shell" in leg_page and "cmdk-modal" in leg_page and "tabular-nums" in leg_page,
+        )
+    else:
+        check("erp shell & cmdk palette", "erp-shell" in page and "cmdk-modal" in page and "tabular-nums" in page)
     lowered = {k.lower(): v for k, v in headers.items()}
     check("security headers", lowered.get("x-content-type-options") == "nosniff")
     status, _h, body = call(base, "GET", "/healthz")
