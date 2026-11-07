@@ -293,12 +293,11 @@ def dispatch_http(
             payload = _parse_json_object(raw)
             checksum = store.persistence.restore_backup(principal.tenant_id, payload)
             # Reload in-memory service from restored state
-            _, service, _, _ = store.resolve_with_principal(session_id)
             restored_dict = store.persistence.load_tenant_state(principal.tenant_id)
             if restored_dict is not None:
                 from archon_demo.service import DemoService
                 restored_svc = DemoService.from_persisted_dict(restored_dict)
-                store._services[principal.tenant_id] = (restored_svc, time.monotonic())
+                store._services[principal.tenant_id] = (restored_svc, time.monotonic(), checksum)
             return _finish(200, {"restored": True, "sha256_checksum": checksum}, "application/json")
 
         if method == "POST" and clean_path.startswith("/api/approve/"):

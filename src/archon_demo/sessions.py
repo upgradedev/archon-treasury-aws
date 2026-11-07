@@ -34,7 +34,7 @@ TTL_SECONDS = 1800
 @dataclass(slots=True)
 class SessionStore:
     db_path: str | None = None
-    _services: dict[str, tuple[DemoService, float]] = field(default_factory=dict)
+    _services: dict[str, tuple[DemoService, float, str]] = field(default_factory=dict)
     _principals: dict[str, tuple[SessionPrincipal, float]] = field(default_factory=dict)
     _lock: threading.RLock = field(default_factory=threading.RLock)
     _persistence: PersistenceStore | None = field(default=None, init=False)
@@ -42,6 +42,10 @@ class SessionStore:
     def __post_init__(self) -> None:
         effective_path = self.db_path or os.environ.get("ARCHON_STATE_DB_PATH") or ":memory:"
         self._persistence = PersistenceStore(effective_path)
+        self._lock = self._persistence.lock
+
+    def mutation_lock(self) -> threading.RLock:
+        return self._lock
 
     @property
     def persistence(self) -> PersistenceStore:
@@ -78,46 +82,35 @@ class SessionStore:
             principal = anonymous_demo_principal(fresh_id)
             service = DemoService.seeded(tenant_id=principal.tenant_id)
             self._principals[fresh_id] = (principal, now)
-            self._services[principal.tenant_id] = (service, now)
             self.persistence.save_session(principal, TTL_SECONDS)
-            self.persistence.save_tenant_state(principal.tenant_id, service.to_persisted_dict())
+            checksum = self.persistence.save_tenant_state(principal.tenant_id, service.to_persisted_dict())
+            self._services[principal.tenant_id] = (service, now, checksum)
             return fresh_id, service, principal, True
 
     def _load_or_create_tenant_service(self, principal: SessionPrincipal, now: float) -> DemoService:
         tid = principal.tenant_id
-        # If backed by a persistent file on disk, reload latest state from SQLite so
-        # multi-worker or cold-start updates are always reflected consistently.
-        if self.persistence.db_path != ":memory:":
-            stored = self.persistence.load_tenant_state(tid)
-            if stored is not None:
-                cached = self._services.get(tid)
-                if cached is not None:
-                    # Preserve live transport mock/object on in-process instance if unchanged
-                    restored = DemoService.from_persisted_dict(stored)
-                    restored.transport = cached[0].transport
-                    self._services[tid] = (restored, now)
-                    return restored
-                restored = DemoService.from_persisted_dict(stored)
-                self._services[tid] = (restored, now)
-                return restored
-
         cached = self._services.get(tid)
-        if cached is not None:
-            self._services[tid] = (cached[0], now)
+        db_checksum = self.persistence.get_tenant_checksum(tid)
+
+        if cached is not None and (db_checksum is None or cached[2] == db_checksum):
+            self._services[tid] = (cached[0], now, cached[2])
             return cached[0]
 
-        stored = self.persistence.load_tenant_state(tid)
-        if stored is not None:
-            restored = DemoService.from_persisted_dict(stored)
-            self._services[tid] = (restored, now)
-            return restored
+        if db_checksum is not None:
+            stored = self.persistence.load_tenant_state(tid)
+            if stored is not None:
+                restored = DemoService.from_persisted_dict(stored)
+                if cached is not None:
+                    restored.transport = cached[0].transport
+                self._services[tid] = (restored, now, db_checksum)
+                return restored
 
         if principal.is_live_tenant:
             service = DemoService.empty_tenant(tid)
         else:
             service = DemoService.seeded(tenant_id=tid)
-        self._services[tid] = (service, now)
-        self.persistence.save_tenant_state(tid, service.to_persisted_dict())
+        checksum = self.persistence.save_tenant_state(tid, service.to_persisted_dict())
+        self._services[tid] = (service, now, checksum)
         return service
 
     def persist(self, session_id: str) -> None:
@@ -130,7 +123,8 @@ class SessionStore:
             s_entry = self._services.get(principal.tenant_id)
             if s_entry is None:
                 return
-            self.persistence.save_tenant_state(principal.tenant_id, s_entry[0].to_persisted_dict())
+            checksum = self.persistence.save_tenant_state(principal.tenant_id, s_entry[0].to_persisted_dict())
+            self._services[principal.tenant_id] = (s_entry[0], time.monotonic(), checksum)
 
     def signup(
         self,
@@ -257,9 +251,9 @@ class SessionStore:
             principal = anonymous_demo_principal(session_id)
             service = DemoService.seeded(tenant_id=principal.tenant_id)
             self._principals[session_id] = (principal, now)
-            self._services[principal.tenant_id] = (service, now)
             self.persistence.save_session(principal, TTL_SECONDS)
-            self.persistence.save_tenant_state(principal.tenant_id, service.to_persisted_dict())
+            checksum = self.persistence.save_tenant_state(principal.tenant_id, service.to_persisted_dict())
+            self._services[principal.tenant_id] = (service, now, checksum)
             return principal
 
     def _evict(self, now: float) -> None:
@@ -270,7 +264,7 @@ class SessionStore:
             oldest = min(self._principals, key=lambda sid: self._principals[sid][1])
             del self._principals[oldest]
 
-        expired_tids = [tid for tid, (_svc, seen) in self._services.items() if now - seen > TTL_SECONDS]
+        expired_tids = [tid for tid, (_svc, seen, _chk) in self._services.items() if now - seen > TTL_SECONDS]
         for tid in expired_tids:
             del self._services[tid]
         while len(self._services) >= MAX_SESSIONS:

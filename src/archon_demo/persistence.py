@@ -47,6 +47,21 @@ from kerdon.money import Money
 
 AuthorizationError = CapabilityError
 
+_DB_LOCKS_GUARD = threading.Lock()
+_DB_LOCKS: dict[str, threading.RLock] = {}
+
+
+def shared_db_lock(db_path: str) -> threading.RLock:
+    if db_path == ":memory:":
+        return threading.RLock()
+    key = str(Path(db_path).resolve())
+    with _DB_LOCKS_GUARD:
+        lock = _DB_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _DB_LOCKS[key] = lock
+        return lock
+
 
 def default_db_path() -> str:
     configured = os.environ.get("ARCHON_STATE_DB_PATH", "").strip()
@@ -254,13 +269,17 @@ class PersistenceStore:
 
     def __init__(self, db_path: str | None = None) -> None:
         self.db_path = db_path or default_db_path()
-        self._lock = threading.RLock()
+        self._lock = shared_db_lock(self.db_path)
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=10.0)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
         self._seed_default_operators()
+
+    @property
+    def lock(self) -> threading.RLock:
+        return self._lock
 
     def _init_schema(self) -> None:
         with self._lock, self._conn:
@@ -511,6 +530,14 @@ class PersistenceStore:
                 (tenant_id, raw, checksum, datetime.now(timezone.utc).isoformat()),
             )
         return checksum
+
+    def get_tenant_checksum(self, tenant_id: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT sha256_checksum FROM tenant_states WHERE tenant_id = ?",
+                (tenant_id,),
+            ).fetchone()
+        return row["sha256_checksum"] if row else None
 
     def load_tenant_state(self, tenant_id: str) -> dict | None:
         with self._lock:
