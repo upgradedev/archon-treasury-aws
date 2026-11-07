@@ -88,6 +88,23 @@ class LiveTransportTest(unittest.TestCase):
         self.assertFalse(live_credentials_present({"AWX_CLIENT_ID": "cid"}))
         self.assertTrue(live_credentials_present({"AWX_CLIENT_ID": "cid", "AWX_API_KEY": "key"}))
 
+    def test_prepare_payload_for_sandbox_host(self):
+        cfg = AirwallexConfig.from_env({"AWX_CLIENT_ID": "cid", "AWX_API_KEY": "key"})
+        tr = HttpAirwallexTransport(cfg)
+        raw = {
+            "request_id": "req-1",
+            "amount": "450.00",
+            "currency": "USD",
+            "beneficiary_id": "supplier-a",
+            "metadata": {"obligation_id": "obl-usd-1"},
+        }
+        enriched = tr._prepare_payload("/api/v1/transfers/create", raw)
+        self.assertEqual(enriched["transfer_amount"], "450.00")
+        self.assertEqual(enriched["transfer_currency"], "USD")
+        self.assertEqual(len(enriched["beneficiary_id"]), 36)
+        self.assertEqual(tr._prepare_payload("/api/v1/balances/current", None), None)
+        self.assertEqual(tr._prepare_payload("/api/v1/fx/quotes/create", {"x": 1}), {"x": 1})
+
     def test_get_fx_rates_and_cache(self):
         reset_fx_cache()
         offline = get_fx_rates(allow_network=False)

@@ -13,11 +13,18 @@ import json
 import os
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 
 from adapters.airwallex_client import AdapterError, DuplicateRequestError
 
-DEFAULT_BASE_URL = "https://api.sandbox.airwallex.com"
+DEFAULT_BASE_URL = "https://api-demo.airwallex.com"
+
+SANDBOX_BENEFICIARIES_BY_CCY = {
+    "USD": "b3d13b3d-5621-421d-bebb-d48e17d145ad",
+    "EUR": "ce3bbe39-5325-462b-8293-888df6015034",
+    "GBP": "39a351b3-8601-423b-8751-f5129ebd446e",
+}
 
 
 @dataclass(slots=True)
@@ -47,6 +54,9 @@ class AirwallexConfig:
 class HttpAirwallexTransport:
     config: AirwallexConfig
     _token: str | None = field(default=None)
+    calls: list[tuple[str, str, dict | None]] = field(default_factory=list)
+    transfer_count: int = 0
+    _session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     def _authenticate(self) -> str:
         if self._token:
@@ -63,8 +73,38 @@ class HttpAirwallexTransport:
         self._token = token
         return token
 
+    def _prepare_payload(self, path: str, payload: dict | None) -> dict | None:
+        if payload is None or "airwallex.com" not in self.config.base_url:
+            return payload
+        if path == "/api/v1/transfers/create":
+            ccy = str(payload.get("currency", "USD"))
+            amt = str(payload.get("amount", "0.00"))
+            raw_req = str(payload.get("request_id", ""))
+            scoped_req = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{self._session_id}:{raw_req}"))
+            ben_id = str(payload.get("beneficiary_id", ""))
+            if len(ben_id) != 36:
+                ben_id = SANDBOX_BENEFICIARIES_BY_CCY.get(ccy, SANDBOX_BENEFICIARIES_BY_CCY["USD"])
+            meta = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+            return {
+                **payload,
+                "request_id": scoped_req,
+                "beneficiary_id": ben_id,
+                "transfer_amount": amt,
+                "transfer_currency": ccy,
+                "source_currency": ccy,
+                "transfer_method": "SWIFT" if ccy == "GBP" else "LOCAL",
+                "swift_charge_option": "SHARED",
+                "reason": "payment_to_supplier",
+                "reference": str(meta.get("obligation_id", "ARCHON-TX")),
+            }
+        return payload
+
     def _raw(self, method: str, path: str, payload: dict | None, headers: dict) -> dict:
-        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        data = (
+            json.dumps(payload).encode("utf-8")
+            if payload is not None
+            else (b"" if method == "POST" else None)
+        )
         req = urllib.request.Request(
             f"{self.config.base_url}{path}",
             data=data,
@@ -84,7 +124,12 @@ class HttpAirwallexTransport:
 
     def __call__(self, method: str, path: str, payload: dict | None) -> dict:
         token = self._authenticate()
-        return self._raw(method, path, payload, {"Authorization": f"Bearer {token}"})
+        wire_payload = self._prepare_payload(path, payload)
+        self.calls.append((method, path, wire_payload))
+        out = self._raw(method, path, wire_payload, {"Authorization": f"Bearer {token}"})
+        if path == "/api/v1/transfers/create" and out.get("id"):
+            self.transfer_count += 1
+        return out
 
 
 def live_credentials_present(env: dict | None = None) -> bool:

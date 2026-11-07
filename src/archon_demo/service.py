@@ -206,7 +206,7 @@ def _seed_disputed_orders() -> tuple[SignedX402Order, ...]:
 
 
 def _default_transport():
-    if live_credentials_present():
+    if os.environ.get("ARCHON_ENABLE_LIVE_BEDROCK") == "1" and live_credentials_present():
         return HttpAirwallexTransport(AirwallexConfig.from_env())
     return FakeAirwallexTransport()
 
@@ -657,7 +657,7 @@ class DemoService:
             "transfer_count": getattr(self.transport, "transfer_count", len(self.transfers)),
             "mode": (
                 "live-airwallex-sandbox"
-                if live_credentials_present()
+                if isinstance(self.transport, HttpAirwallexTransport)
                 else "synthetic-demo-fake-transport"
             ),
         }

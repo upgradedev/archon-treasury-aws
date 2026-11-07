@@ -63,12 +63,13 @@ def main(base: str) -> int:
           outcome.get("invalidated") == ["obl-eur-1"] and outcome.get("still_valid") == ["obl-usd-1"],
           json.dumps(outcome)[:160])
     status, _h, _b = call(base, "POST", "/api/execute/obl-usd-1", {})
-    check("valid USD executes", status == 200, f"HTTP {status}")
+    tx_out = json.loads(_b) if status == 200 else {}
+    check("valid USD executes", status == 200 and bool(tx_out.get("transfer_id")), f"HTTP {status} transfer_id={tx_out.get('transfer_id')}")
     status, _h, body = call(base, "POST", "/api/execute/obl-eur-1", {})
     check("stale EUR refused 409", status == 409 and "stale" in body, f"HTTP {status}")
     status, _h, body = call(base, "GET", "/api/state")
     state = json.loads(body) if status == 200 else {}
-    check("exactly one transfer", state.get("transfer_count") == 1, f"count={state.get('transfer_count')}")
+    check("exactly one transfer", state.get("transfer_count") == 1, f"count={state.get('transfer_count')} mode={state.get('mode')}")
     fx = state.get("fx_rates") or {}
     check("live ECB FX reference rates", bool(fx.get("eur_usd") and fx.get("eur_gbp") and fx.get("gbp_usd")), f"source={fx.get('source')} eur_usd={fx.get('eur_usd')}")
     rules = {f["rule_id"] for f in state.get("findings", [])}

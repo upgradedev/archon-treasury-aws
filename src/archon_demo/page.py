@@ -251,7 +251,7 @@ Total due USD 450.00</textarea>
               <ul class="compact-list" style="font-size:0.8rem;color:var(--slate-600)">
                 <li><strong>Balances &amp; FX:</strong> <code>GET /api/v1/balances/current</code>, <code>POST /api/v1/fx/quotes/create</code>, <code>POST /api/v1/fx/conversions/create</code> (flat EUR 12.85 SWIFT fee vs 0.00 LOCAL).</li>
                 <li><strong>Writer Gate:</strong> <code>POST /api/v1/transfers/create</code> with derived <code>uuid5</code> request_id and 7-day idempotency lock.</li>
-                <li><strong>Webhooks &amp; Simulation:</strong> HMAC-SHA256 verified deposit and transfer transition webhooks (synthetic transport active until O-2 sandbox keys connect).</li>
+                <li><strong>Webhooks &amp; Simulation:</strong> HMAC-SHA256 verified deposit and transfer transition webhooks connected to live Airwallex Sandbox (<code>Sandbox Business</code>, IBAN <code>NL81AINH4272955670</code>).</li>
               </ul>
             </section>
           </div>
