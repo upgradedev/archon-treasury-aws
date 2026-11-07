@@ -4,7 +4,7 @@ Copy everything below into Antigravity.
 
 ---
 
-Continue work on https://github.com/upgradedev/archon-treasury-aws on branch `design/archon-gtm-ui`. Do not work on, merge into, or deploy `main` without my explicit approval. Deliver a genuinely live, tested treasury application—not a mockup. Preserve existing backend integrations and financial safety rules.
+Continue work on https://github.com/upgradedev/archon-treasury-aws on branch `design/archon-gtm-ui`. Do not work on, merge into, or deploy `main` without my explicit approval. Deliver a genuinely live, tested treasury application - not a mockup. Preserve existing backend integrations and financial safety rules.
 
 ## Read first
 Read the entire repository, especially AGENTS.md, docs/REDESIGN_VERIFICATION.md, frontend/src/features/treasury/, src/archon_demo/, src/kerdon/, src/adapters/, infra/, packaging scripts and CI. Inspect current code and deployed configuration; do not infer readiness from this prompt or a healthy endpoint.
@@ -36,4 +36,4 @@ Confirm response shapes and valid values from source; do not silently alter cont
 ## Required release evidence
 Verify authenticated tenant-scoped staging journeys with actual data: persisted deposit readback; selective approval invalidation; stale execution refused; reapproval and one-time execution; sealed receipts and audit export; floor breaches; expired quotes; duplicate/concurrent requests; card MCC/cap/single-use; invoice evaluation and provider failures; incidents/recovery; agent spending permissions/limits. Test desktop/mobile with screenshots and console/network checks. Prove survival through reload, session renewal and backend cold starts.
 
-Separate implemented, tested, skipped and blocked work. Supply commands, test counts, staging URL, configuration names without secret values, deployment/rollback steps and remaining risks. Obtain my approval before main merge, production deployment, real payments or production-data changes. Name missing access as a blocker; do not invent success. A final live claim requires a deployed authenticated end-to-end journey with persisted readback—not a screenshot or green health check.
+Separate implemented, tested, skipped and blocked work. Supply commands, test counts, staging URL, configuration names without secret values, deployment/rollback steps and remaining risks. Obtain my approval before main merge, production deployment, real payments or production-data changes. Name missing access as a blocker; do not invent success. A final live claim requires a deployed authenticated end-to-end journey with persisted readback - not a screenshot or green health check.

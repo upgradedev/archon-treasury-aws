@@ -1,3 +1,34 @@
 import React from 'react';
+import { compactMoney } from './formatters';
 import { WalletBalance } from './types';
-export const KpiGrid: React.FC<{balances: ReadonlyArray<WalletBalance>}> = ({balances}) => <section aria-label="Wallet balances" className="metric-grid">{balances.map(w => <article key={w.account_id} className="metric"><div className="eyebrow">{w.currency} wallet</div><div className="money value">{w.amount_major ?? w.amount}</div><meter min={0} max={Math.max(1,w.amount_cents,w.reserve_floor_cents)} value={Math.max(0,w.amount_cents-w.reserve_floor_cents)} aria-label={`${w.currency} spendable funds`}/><div className="metric-footer"><span>Reserve floor <strong className="money">{w.reserve_floor_major ?? w.reserve_floor}</strong></span><span>Spendable <strong className="money">{w.headroom_major}</strong></span></div></article>)}</section>;
+
+export const KpiGrid: React.FC<{ balances: ReadonlyArray<WalletBalance> }> = ({ balances }) => (
+  <section aria-label="Wallet balances" className="metric-grid">
+    {balances.map((w) => {
+      const amt = compactMoney(w.amount_major ?? w.amount);
+      const floor = compactMoney(w.reserve_floor_major ?? w.reserve_floor);
+      return (
+        <article key={w.account_id} className="metric">
+          <div className="eyebrow">{w.currency} wallet</div>
+          <div className="money value" title={w.amount}>
+            {amt.primary}
+          </div>
+          <meter
+            min={0}
+            max={Math.max(1, w.amount_cents, w.reserve_floor_cents)}
+            value={Math.max(0, w.amount_cents - w.reserve_floor_cents)}
+            aria-label={`${w.currency} spendable funds`}
+          />
+          <div className="metric-footer">
+            <span>
+              Reserve floor <strong className="money">{floor.primary}</strong>
+            </span>
+            <span>
+              Spendable <strong className="money">{w.headroom_major}</strong>
+            </span>
+          </div>
+        </article>
+      );
+    })}
+  </section>
+);

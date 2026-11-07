@@ -143,3 +143,41 @@ def live_credentials_present(env: dict | None = None) -> bool:
     source = os.environ if env is None else env
     return bool(source.get("AWX_CLIENT_ID", "").strip() and source.get("AWX_API_KEY", "").strip())
 
+
+def airwallex_enabled(env: dict | None = None) -> bool:
+    """Decoupled Airwallex provider selection (independent of Bedrock)."""
+    source = os.environ if env is None else env
+    if not live_credentials_present(source):
+        return False
+    explicit_mode = source.get("ARCHON_AIRWALLEX_MODE", "").strip().lower()
+    if explicit_mode == "fake":
+        return False
+    if explicit_mode in ("sandbox", "live"):
+        return True
+    if source.get("ARCHON_ENABLE_LIVE_AIRWALLEX", "").strip() == "1":
+        return True
+    # Preserve deployed Lambda behavior when AWS_LAMBDA_FUNCTION_NAME is present
+    if source.get("AWS_LAMBDA_FUNCTION_NAME", "").strip():
+        return True
+    return False
+
+
+def resolve_airwallex_mode_label(transport: object | None = None, env: dict | None = None) -> str:
+    """Distinguish synthetic demo vs Airwallex sandbox vs Airwallex production live."""
+    source = os.environ if env is None else env
+    if transport is None:
+        if not airwallex_enabled(source):
+            return "synthetic-demo-fake-transport"
+        explicit = source.get("ARCHON_AIRWALLEX_MODE", "").strip().lower()
+        base = source.get("AWX_BASE_URL", DEFAULT_BASE_URL).lower()
+        if explicit == "live" or ("api.airwallex.com" in base and "sandbox" not in base and "demo" not in base):
+            return "airwallex-production-live"
+        return "live-airwallex-sandbox"
+    if not isinstance(transport, HttpAirwallexTransport):
+        return "synthetic-demo-fake-transport"
+    explicit = source.get("ARCHON_AIRWALLEX_MODE", "").strip().lower()
+    base = transport.config.base_url.lower()
+    if explicit == "live" or ("api.airwallex.com" in base and "sandbox" not in base and "demo" not in base):
+        return "airwallex-production-live"
+    return "live-airwallex-sandbox"
+

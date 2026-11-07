@@ -47,6 +47,7 @@ class Handler(BaseHTTPRequestHandler):
         if method == "POST":
             length = int(self.headers.get("Content-Length", "0"))
             if length < 0 or length > MAX_BODY_BYTES:
+                self.close_connection = True
                 _json(self, 413, {"error": "request body too large"})
                 return
             try:
@@ -54,6 +55,7 @@ class Handler(BaseHTTPRequestHandler):
             except UnicodeDecodeError as exc:
                 _json(self, 400, {"error": f"bad request: {exc}"})
                 return
+        req_headers = {k.lower(): v for k, v in self.headers.items()}
         status, body, content_type, set_cookie = dispatch_http(
             STORE,
             method,
@@ -61,6 +63,7 @@ class Handler(BaseHTTPRequestHandler):
             raw,
             self.headers.get("Cookie"),
             default_sha="not-deployed-local-dev",
+            headers=req_headers,
         )
         if method == "HEAD":
             _send(self, status, b"", content_type, set_cookie)

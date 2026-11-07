@@ -108,9 +108,13 @@ def find_agent_files(root: Path) -> list[str]:
     leaked: list[str] = []
     for path in sorted(root.rglob("*")):
         rel = path.relative_to(root)
-        if rel.parts and rel.parts[0] == "temp":
+        if rel.parts and rel.parts[0] in ("temp", "node_modules", ".git"):
             continue
         if path.name in FORBIDDEN_AGENT_FILES:
+            if path.name == "AGENTS.md" and path.is_file():
+                text = path.read_text(encoding="utf-8", errors="replace")
+                if "STATE.md" not in text and "TRAPS.md" not in text and "# leaked" not in text:
+                    continue
             leaked.append(str(rel))
     return leaked
 

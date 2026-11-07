@@ -23,7 +23,13 @@ from adapters.airwallex_client import AirwallexClient, FakeAirwallexTransport, p
 from adapters.bedrock_evaluator import BedrockEvaluator
 from adapters.evaluator import DeterministicEvaluator
 from adapters.fx_rates_client import get_fx_rates
-from adapters.live_transport import AirwallexConfig, HttpAirwallexTransport, live_credentials_present
+from adapters.live_transport import (
+    AirwallexConfig,
+    HttpAirwallexTransport,
+    airwallex_enabled,
+    live_credentials_present,
+    resolve_airwallex_mode_label,
+)
 from adapters.metal_client import (
     AgentBudget,
     FakeMetalTransport,
@@ -39,6 +45,7 @@ from kerdon.approvals import (
     RequestIdLedger,
     check_token,
     derive_request_id,
+    invalidate_changed,
     operation_sha256,
 )
 from kerdon.completeness import evaluate
@@ -46,6 +53,7 @@ from kerdon.errors import DomainError, StaleApprovalError
 from kerdon.models import (
     Balance,
     ExecutionRecord,
+    FxQuote,
     LedgerEntry,
     Obligation,
     ObligationStatus,
@@ -206,7 +214,7 @@ def _seed_disputed_orders() -> tuple[SignedX402Order, ...]:
 
 
 def _default_transport():
-    if os.environ.get("ARCHON_ENABLE_LIVE_BEDROCK") == "1" and live_credentials_present():
+    if airwallex_enabled():
         return HttpAirwallexTransport(AirwallexConfig.from_env())
     return FakeAirwallexTransport()
 
@@ -221,6 +229,12 @@ class DemoService:
     tokens: dict[str, ApprovalToken] = field(default_factory=dict)
     receipts: dict[str, dict] = field(default_factory=dict)
     transfers: dict[str, str] = field(default_factory=dict)
+    approvers_by_obligation: dict[str, str] = field(default_factory=dict)
+    deposit_history: list[dict] = field(default_factory=list)
+    fx_conversions: list[dict] = field(default_factory=list)
+    seen_webhook_ids: set[str] = field(default_factory=set)
+    tenant_id: str = "demo-tenant"
+    is_live_tenant: bool = False
     contradicted_by_email: bool = False
     deposit_confirmed: bool = False
     last_dispute_report: dict | None = None
@@ -229,33 +243,58 @@ class DemoService:
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     @classmethod
-    def seeded(cls, as_of: datetime | None = None) -> "DemoService":
-        return cls(seed_snapshot(as_of or datetime.now(timezone.utc)))
+    def seeded(cls, as_of: datetime | None = None, tenant_id: str = "demo-tenant") -> "DemoService":
+        return cls(seed_snapshot(as_of or datetime.now(timezone.utc)), tenant_id=tenant_id, is_live_tenant=False)
+
+    @classmethod
+    def empty_tenant(cls, tenant_id: str, as_of: datetime | None = None) -> "DemoService":
+        """Create an isolated live tenant with zero synthetic money seeded."""
+        now = as_of or datetime.now(timezone.utc)
+        snap = TreasurySnapshot(
+            as_of=now,
+            balances=(
+                Balance("ga-us-demo", Money(0, "USD")),
+                Balance("ga-de-demo", Money(0, "EUR")),
+                Balance("ga-gb-demo", Money(0, "GBP")),
+            ),
+            obligations=(),
+            ledger_entries=(),
+            reserve_floors=(Money(0, "USD"), Money(0, "EUR"), Money(0, "GBP")),
+        )
+        return cls(snap, tenant_id=tenant_id, is_live_tenant=True)
 
     def reset(self) -> None:
         with self._lock:
-            fresh = DemoService.seeded(self.snapshot.as_of)
+            if self.is_live_tenant:
+                fresh = DemoService.empty_tenant(self.tenant_id, self.snapshot.as_of)
+            else:
+                fresh = DemoService.seeded(self.snapshot.as_of, tenant_id=self.tenant_id)
             self.snapshot, self.transport, self.metal = fresh.snapshot, fresh.transport, fresh.metal
             self.incident = fresh.incident
             self.visa_mandate = fresh.visa_mandate
             self.tokens, self.receipts, self.transfers, self._gate = {}, {}, {}, fresh._gate
+            self.approvers_by_obligation = {}
+            self.deposit_history = []
+            self.fx_conversions = []
+            self.seen_webhook_ids = set()
             self.contradicted_by_email = False
             self.deposit_confirmed = False
             self.last_dispute_report = None
             self.last_ai_inspection = None
 
-    def approve(self, obligation_id: str) -> dict:
+    def approve(self, obligation_id: str, approver_id: str = APPROVER) -> dict:
         with self._lock:
-            return self._approve_locked(obligation_id)
+            return self._approve_locked(obligation_id, approver_id)
 
-    def _approve_locked(self, obligation_id: str) -> dict:
+    def _approve_locked(self, obligation_id: str, approver_id: str = APPROVER) -> dict:
         obl = self._obligation(obligation_id)
         token = ApprovalToken(
             ApprovalIntent.from_snapshot(self.snapshot, obl, "demo-terms-net-14"),
-            APPROVER,
+            approver_id or APPROVER,
             self.snapshot.as_of,
         )
         self.tokens[obligation_id] = token
+        self.approvers_by_obligation[obligation_id] = approver_id or APPROVER
         kept = tuple(p for p in self.snapshot.pending_approvals if p.obligation_id != obligation_id)
         self.snapshot = replace(
             self.snapshot,
@@ -268,41 +307,90 @@ class DemoService:
             "merkle_root_sha256": receipt.root_sha256,
             "merkle_verified": receipt.verify(),
         }
-        return {"obligation_id": obligation_id, "approval_sha256": token.sha256, "state": "VALID"}
+        return {
+            "obligation_id": obligation_id,
+            "approval_sha256": token.sha256,
+            "approver_id": approver_id or APPROVER,
+            "state": "VALID",
+        }
 
     def simulate_deposit(self, currency: str, amount_major: str) -> dict:
         with self._lock:
             return self._simulate_deposit_locked(currency, amount_major)
 
-    def _simulate_deposit_locked(self, currency: str, amount_major: str) -> dict:
-        money = parse_major_amount(amount_major, currency)
-        if not money.is_positive:
-            raise DomainError("deposit amount must be greater than zero")
-        account = ACCOUNT_BY_CURRENCY.get(currency)
-        if account is None:
-            raise DomainError(f"no demo account for currency {currency!r}")
-        body = json.dumps(
-            {
-                "id": f"evt-demo-{len(self.transport.calls) + 1}",
-                "data": {"global_account_id": account, "currency": currency, "amount": money.to_major_str()},
-            }
-        ).encode()
-        tokens = tuple(self.tokens.values())
-        self.snapshot, results = handle_webhook(
-            body, sign_payload(body, DEMO_WEBHOOK_SECRET), DEMO_WEBHOOK_SECRET, self.snapshot, tokens
+    def _simulate_deposit_locked(
+        self,
+        currency: str,
+        amount_major: str,
+        payer_name: str = "Synthetic Webhook Deposit",
+        reference: str | None = None,
+        event_id: str | None = None,
+    ) -> dict:
+        from archon_demo.operations import run_deposit_locked
+
+        return run_deposit_locked(
+            self,
+            currency,
+            amount_major,
+            payer_name,
+            reference,
+            event_id,
+            ACCOUNT_BY_CURRENCY,
+            DEMO_WEBHOOK_SECRET,
         )
-        self.deposit_confirmed = True
-        self.contradicted_by_email = False
-        return {
-            "currency": currency,
-            "amount": money.spoken(),
-            "invalidated": sorted(
-                r.token.intent.obligation_id for r in results if r.state is ApprovalState.INVALIDATED
-            ),
-            "still_valid": sorted(
-                r.token.intent.obligation_id for r in results if r.state is ApprovalState.VALID
-            ),
-        }
+
+    def record_deposit(
+        self,
+        currency: str,
+        amount_major: str,
+        payer_name: str = "Inbound Treasury Wire",
+        reference: str | None = None,
+        event_id: str | None = None,
+    ) -> dict:
+        """Record an authenticated persistent deposit into the tenant's global account."""
+        with self._lock:
+            return self._simulate_deposit_locked(
+                currency=str(currency).upper(),
+                amount_major=str(amount_major),
+                payer_name=str(payer_name or "Inbound Treasury Wire").strip()[:120],
+                reference=str(reference).strip()[:80] if reference else None,
+                event_id=event_id,
+            )
+
+    def ingest_signed_webhook(self, raw_body: bytes, signature: str | None, secret: str | None = None) -> dict:
+        """Process an HMAC-signed Airwallex deposit webhook with replay protection."""
+        from archon_demo.operations import run_signed_webhook
+
+        with self._lock:
+            webhook_secret = secret or os.environ.get("ARCHON_WEBHOOK_SECRET", DEMO_WEBHOOK_SECRET)
+            return run_signed_webhook(self, raw_body, signature, webhook_secret, ACCOUNT_BY_CURRENCY)
+
+    def update_reserve_floor(self, currency: str, reserve_floor_major: str) -> dict:
+        """Update a currency's reserve floor and re-check all pending approvals."""
+        from archon_demo.operations import run_update_reserve_floor
+
+        with self._lock:
+            return run_update_reserve_floor(self, currency, reserve_floor_major, ACCOUNT_BY_CURRENCY)
+
+    def create_fx_quote(
+        self,
+        sell_currency: str,
+        buy_currency: str,
+        sell_amount_major: str,
+        ttl_seconds: int = 300,
+    ) -> dict:
+        """Create a deterministic integer-ratio FX quote bound to snapshot.as_of + ttl_seconds."""
+        from archon_demo.operations import run_create_fx_quote
+
+        with self._lock:
+            return run_create_fx_quote(self, sell_currency, buy_currency, sell_amount_major, ttl_seconds)
+
+    def execute_fx_conversion(self, quote_id: str) -> dict:
+        """Execute a locked FX quote if unexpired and within sell-currency reserve floor."""
+        from archon_demo.operations import run_execute_fx_conversion
+
+        with self._lock:
+            return run_execute_fx_conversion(self, quote_id, ACCOUNT_BY_CURRENCY)
 
     def execute(self, obligation_id: str, expected_sha256: str | None = None) -> dict:
         with self._lock:
@@ -423,30 +511,9 @@ class DemoService:
 
     def export_audit_csv(self) -> str:
         """Export deterministic audit trail CSV for CFO / external auditor reconciliation."""
-        state = self.state()
-        lines = [
-            "obligation_id,supplier_name,invoice_ref,currency,amount_major,rail,rail_fee,plan_action,approval_state,approval_sha256,merkle_root_sha256"
-        ]
-        for o in state["obligations"]:
-            rec = o.get("receipt") or {}
-            lines.append(
-                ",".join(
-                    [
-                        str(o["obligation_id"]),
-                        f'"{o["supplier_name"]}"',
-                        str(o["invoice_ref"]),
-                        str(o["currency"]),
-                        str(o["amount_major"]),
-                        str(o["rail"]),
-                        f'"{o["rail_fee"]}"',
-                        str(o["plan_action"]),
-                        str(o["approval_state"]),
-                        str(o.get("approval_sha256") or ""),
-                        str(rec.get("merkle_root_sha256") or ""),
-                    ]
-                )
-            )
-        return "\n".join(lines) + "\n"
+        from archon_demo.operations import build_audit_csv
+
+        return build_audit_csv(self.state())
 
     def trigger_incident_failure(self, failure_type: str = "bank_return") -> dict:
         """Kit 3: transition SENT transfer to CANCELLED with a bank failure_type."""
@@ -495,43 +562,53 @@ class DemoService:
             self.last_dispute_report = report
             return report
 
+    def reconcile_ledger(self) -> dict:
+        """Reconcile executed payouts, pending approvals, and provider transfer records."""
+        with self._lock:
+            return self._reconcile_locked()
+
+    def _reconcile_locked(self) -> dict:
+        from archon_demo.operations import compute_reconciliation
+
+        return compute_reconciliation(self)
+
+    def integration_status(self) -> dict:
+        """Return honest, decoupled provider configuration and connection status."""
+        with self._lock:
+            return self._integration_status_locked()
+
+    def _integration_status_locked(self) -> dict:
+        from archon_demo.operations import compute_integration_status
+
+        return compute_integration_status(self, _BEDROCK_CALLS, _BEDROCK_MAX_CALLS)
+
+    def to_persisted_dict(self) -> dict:
+        """Serialize full tenant service state for SQLite/AWS persistence across restarts."""
+        from archon_demo.operations import serialize_service_state
+
+        with self._lock:
+            return serialize_service_state(self)
+
+    @classmethod
+    def from_persisted_dict(cls, data: dict) -> "DemoService":
+        """Reconstruct a tenant DemoService from persisted SQLite JSON."""
+        from archon_demo.operations import deserialize_service_state
+
+        return deserialize_service_state(cls, data)
+
     def state(self) -> dict:
         with self._lock:
             return self._state_locked()
 
     def _incident_dict(self) -> dict:
-        inc = self.incident
-        return {
-            "incident_id": inc.incident_id,
-            "obligation_id": inc.obligation_id,
-            "original_transfer_id": inc.original_transfer_id,
-            "original_request_id": inc.original_request_id,
-            "amount": inc.amount.spoken(),
-            "rail": inc.rail.value,
-            "status": inc.status.value,
-            "failure_type": inc.failure_type,
-            "replacement_transfer_id": inc.replacement_transfer_id,
-            "replacement_request_id": inc.replacement_request_id,
-            "swift_fees_budgeted": Money(inc.swift_fees_budgeted_cents, "EUR").spoken(),
-        }
+        from archon_demo.operations import incident_to_dict
+
+        return incident_to_dict(self.incident)
 
     def _visa_dict(self) -> dict:
-        vm = self.visa_mandate
-        return {
-            "card_id": vm.card_id,
-            "obligation_id": vm.obligation_id,
-            "supplier_name": vm.supplier_name,
-            "limit": vm.limit.spoken(),
-            "limit_cents": vm.limit.amount_cents,
-            "allowed_mcc": vm.allowed_mcc,
-            "single_use": vm.single_use,
-            "status": vm.status.value,
-            "card_last4": vm.card_last4,
-            "last_verdict": vm.last_verdict,
-            "last_reason": vm.last_reason,
-            "rebate_earned": Money(vm.rebate_earned_cents, vm.limit.currency).spoken(),
-            "rebate_earned_cents": vm.rebate_earned_cents,
-        }
+        from archon_demo.operations import visa_to_dict
+
+        return visa_to_dict(self.visa_mandate)
 
     def _state_locked(self) -> dict:
         t0 = time.perf_counter()
@@ -654,9 +731,33 @@ class DemoService:
             "last_dispute_report": self.last_dispute_report,
             "last_ai_inspection": self.last_ai_inspection,
             "fx_rates": get_fx_rates(),
+            "fx_quotes": [
+                {
+                    "quote_id": q.quote_id,
+                    "from_currency": q.from_currency,
+                    "to_currency": q.to_currency,
+                    "sell_amount": q.source_amount.spoken(),
+                    "sell_amount_major": f"{q.from_currency} {q.source_amount.to_major_str()}",
+                    "buy_amount_major": (
+                        f"{q.to_currency} "
+                        f"{Money((q.source_amount.amount_cents * q.rate_numerator) // q.rate_denominator, q.to_currency).to_major_str()}"
+                    ),
+                    "rate_numerator": q.rate_numerator,
+                    "rate_denominator": q.rate_denominator,
+                    "expires_at": q.expires_at.isoformat(),
+                    "expired": q.expires_at <= self.snapshot.as_of,
+                }
+                for q in self.snapshot.fx_quotes
+            ],
+            "fx_conversions": list(self.fx_conversions),
+            "deposit_history": list(self.deposit_history),
+            "integrations": self._integration_status_locked(),
+            "reconciliation": self._reconcile_locked(),
+            "tenant_id": self.tenant_id,
+            "is_live_tenant": self.is_live_tenant,
             "transfer_count": getattr(self.transport, "transfer_count", len(self.transfers)),
             "mode": (
-                "live-airwallex-sandbox"
+                resolve_airwallex_mode_label()
                 if isinstance(self.transport, HttpAirwallexTransport)
                 else "synthetic-demo-fake-transport"
             ),

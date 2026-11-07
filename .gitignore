@@ -3,6 +3,7 @@ __pycache__/
 temp/
 .venv/
 node_modules/
+frontend/dist/
 AGENTS.md
 STATE.md
 LOG.md

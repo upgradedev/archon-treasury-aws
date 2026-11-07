@@ -69,7 +69,8 @@ jobs:
             tests/test_metal_evaluator.py \
             tests/test_sessions.py \
             tests/test_lambda_handler.py \
-            tests/test_demo_app.py
+            tests/test_demo_app.py \
+            tests/test_production_gaps.py
 
   testing-pyramid-e2e-local:
     name: "Stage 5: Pyramid L3 - UAT, Concurrency Race & Local 39-Step E2E"
@@ -108,6 +109,10 @@ jobs:
         run: npm run build
       - name: Verify Production Bundle Artifact
         run: test -f dist/index.html
+      - name: Verify Deterministic Lambda Packaging Bundles React Frontend
+        working-directory: .
+        run: |
+          python3 scripts/package_lambda.py | grep '"frontend_bundled": true'
 
   deploy:
     name: "Stage 7: CD Deploy to AWS Lambda & 39-Step Live Production Smoke"
@@ -138,6 +143,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build Frontend Bundle for Lambda Static Packaging
+        run: |
+          npm --prefix frontend install --no-audit --no-fund
+          npm --prefix frontend run build
       - name: Package deterministic Lambda zip
         run: python scripts/package_lambda.py
       - name: Configure AWS OIDC role (when AWS_ROLE_TO_ASSUME is set)

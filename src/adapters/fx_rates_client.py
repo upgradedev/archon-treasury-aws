@@ -37,7 +37,12 @@ def get_fx_rates(allow_network: bool | None = None, endpoint: str = ECB_ENDPOINT
     """Return live ECB FX reference rates (in integer bps and major strings)."""
     global _cached_rates, _cached_at
     if allow_network is None:
-        allow_network = os.environ.get("ARCHON_ENABLE_LIVE_BEDROCK") == "1"
+        allow_network = (
+            os.environ.get("ARCHON_ENABLE_LIVE_FX") == "1"
+            or os.environ.get("ARCHON_ENABLE_LIVE_AIRWALLEX") == "1"
+            or os.environ.get("ARCHON_ENABLE_LIVE_BEDROCK") == "1"
+            or bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+        )
 
     now = time.monotonic()
     if _cached_rates is not None and (now - _cached_at) < _CACHE_TTL_SECONDS:

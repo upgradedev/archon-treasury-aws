@@ -21,6 +21,10 @@ class SignatureError(AdapterError):
     """Webhook HMAC verification failed. The event is refused whole."""
 
 
+class DuplicateWebhookError(AdapterError):
+    """Webhook event_id has already been processed (replay protection)."""
+
+
 def sign_payload(raw_body: bytes, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
 
@@ -79,6 +83,7 @@ def handle_webhook(
     secret: str,
     snapshot: TreasurySnapshot,
     tokens: tuple[ApprovalToken, ...],
+    seen_event_ids: set[str] | None = None,
 ) -> tuple[TreasurySnapshot, tuple[InvalidationResult, ...]]:
     if not verify_signature(raw_body, signature, secret):
         raise SignatureError("webhook signature verification failed")
@@ -87,5 +92,9 @@ def handle_webhook(
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise AdapterError("webhook body is not valid JSON") from exc
     event = parse_deposit_event(payload)
+    if seen_event_ids is not None and event.event_id:
+        if event.event_id in seen_event_ids:
+            raise DuplicateWebhookError(f"webhook event {event.event_id!r} was already processed")
+        seen_event_ids.add(event.event_id)
     updated = apply_deposit(snapshot, event)
     return updated, invalidate_changed(tokens, updated)
