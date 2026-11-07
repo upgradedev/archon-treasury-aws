@@ -69,11 +69,33 @@ def compute_reconciliation(svc: object) -> dict:
     }
 
 
-def compute_integration_status(svc: object, bedrock_calls: int, bedrock_max_calls: int) -> dict:
+def compute_integration_status(
+    svc: object, bedrock_calls: int, bedrock_max_calls: int, probe_live: bool = False
+) -> dict:
     is_http_awx = isinstance(svc.transport, HttpAirwallexTransport)
     awx_mode = resolve_airwallex_mode_label(svc.transport) if is_http_awx else "synthetic-demo-fake-transport"
     bedrock_live = os.environ.get("ARCHON_ENABLE_LIVE_BEDROCK") == "1"
     fx_info = get_fx_rates()
+    awx_live_probe: dict | None = None
+    if probe_live and is_http_awx and "airwallex.com" in svc.transport.config.base_url:
+        try:
+            bals = svc.transport("GET", "/api/v1/balances/current", None)
+            gas = svc.transport("GET", "/api/v1/global_accounts", None)
+            bens = svc.transport("GET", "/api/v1/beneficiaries", None)
+            ga_items = gas.get("items", []) if isinstance(gas, dict) else []
+            ben_items = bens.get("items", []) if isinstance(bens, dict) else []
+            awx_live_probe = {
+                "global_account_iban": ga_items[0].get("iban") if ga_items else None,
+                "global_account_name": ga_items[0].get("account_name") if ga_items else None,
+                "beneficiaries_count": len(ben_items),
+                "wallet_balances": [
+                    {"currency": b.get("currency"), "available_amount": str(b.get("available_amount"))}
+                    for b in (bals if isinstance(bals, list) else [])
+                    if b.get("currency") in ("USD", "EUR", "GBP")
+                ],
+            }
+        except Exception as exc:
+            awx_live_probe = {"probe_error": str(exc)[:200]}
     return {
         "airwallex": {
             "provider": "Airwallex Core API & Webhooks",
@@ -83,6 +105,7 @@ def compute_integration_status(svc: object, bedrock_calls: int, bedrock_max_call
             "decoupled_from_bedrock": True,
             "webhook_replay_protection": True,
             "seen_webhook_events": len(svc.seen_webhook_ids),
+            "live_sandbox_probe": awx_live_probe,
         },
         "bedrock": {
             "provider": "Amazon Bedrock (Claude Haiku 4.5 Evaluator)",
@@ -312,6 +335,22 @@ def run_create_fx_quote(
     target_cents = (source_money.amount_cents * num) // den
     target_money = Money(target_cents, buy_cur)
     quote_id = f"fxq-{len(svc.snapshot.fx_quotes) + len(svc.fx_conversions) + 1}"
+    awx_quote_id = None
+    if isinstance(svc.transport, HttpAirwallexTransport) and "airwallex.com" in svc.transport.config.base_url:
+        try:
+            awx_q = svc.transport(
+                "POST",
+                "/api/v1/fx/quotes/create",
+                {
+                    "buy_currency": buy_cur,
+                    "sell_currency": sell_cur,
+                    "sell_amount": source_money.to_major_str(),
+                    "validity": "MIN_15",
+                },
+            )
+            awx_quote_id = awx_q.get("quote_id")
+        except Exception:
+            awx_quote_id = None
     expires_at = svc.snapshot.as_of + timedelta(seconds=int(ttl_seconds))
     quote = FxQuote(
         quote_id=quote_id,
@@ -325,6 +364,7 @@ def run_create_fx_quote(
     svc.snapshot = replace(svc.snapshot, fx_quotes=svc.snapshot.fx_quotes + (quote,))
     return {
         "quote_id": quote_id,
+        "awx_quote_id": awx_quote_id,
         "from_currency": sell_cur,
         "to_currency": buy_cur,
         "sell_amount": source_money.spoken(),
@@ -354,6 +394,39 @@ def run_execute_fx_conversion(
         raise DomainError(f"FX conversion would breach the {sell_cur} reserve floor")
     buy_cents = (quote.source_amount.amount_cents * quote.rate_numerator) // quote.rate_denominator
     buy_money = Money(buy_cents, buy_cur)
+    awx_conversion_id = None
+    awx_short_ref = None
+    if isinstance(svc.transport, HttpAirwallexTransport) and "airwallex.com" in svc.transport.config.base_url:
+        try:
+            import uuid
+            awx_q = svc.transport(
+                "POST",
+                "/api/v1/fx/quotes/create",
+                {
+                    "buy_currency": buy_cur,
+                    "sell_currency": sell_cur,
+                    "sell_amount": quote.source_amount.to_major_str(),
+                    "validity": "MIN_15",
+                },
+            )
+            live_qid = awx_q.get("quote_id")
+            if live_qid:
+                awx_conv = svc.transport(
+                    "POST",
+                    "/api/v1/fx/conversions/create",
+                    {
+                        "request_id": str(uuid.uuid4()),
+                        "quote_id": live_qid,
+                        "buy_currency": buy_cur,
+                        "sell_currency": sell_cur,
+                        "sell_amount": quote.source_amount.to_major_str(),
+                        "term_agreement": True,
+                    },
+                )
+                awx_conversion_id = awx_conv.get("conversion_id")
+                awx_short_ref = awx_conv.get("short_reference_id")
+        except Exception:
+            awx_conversion_id = None
     new_balances = []
     for b in svc.snapshot.balances:
         if b.amount.currency == sell_cur and b.account_id == account_by_currency.get(sell_cur):
@@ -370,7 +443,8 @@ def run_execute_fx_conversion(
     svc.snapshot = replace(svc.snapshot, balances=tuple(new_balances), fx_quotes=remaining_quotes)
     results = invalidate_changed(tuple(svc.tokens.values()), svc.snapshot)
     conv = {
-        "conversion_id": f"fxc-{len(svc.fx_conversions) + 1}",
+        "conversion_id": awx_conversion_id or f"fxc-{len(svc.fx_conversions) + 1}",
+        "awx_short_reference_id": awx_short_ref,
         "quote_id": quote_id,
         "from_currency": sell_cur,
         "to_currency": buy_cur,
@@ -404,6 +478,28 @@ def run_deposit_locked(
     if account is None:
         raise DomainError(f"no demo account for currency {currency!r}")
     evt_id = event_id or f"evt-demo-{len(svc.deposit_history) + len(getattr(svc.transport, 'calls', ())) + 1}"
+    awx_deposit_id = None
+    if (
+        currency == "EUR"
+        and isinstance(svc.transport, HttpAirwallexTransport)
+        and "airwallex.com" in svc.transport.config.base_url
+    ):
+        try:
+            sim_dep = svc.transport(
+                "POST",
+                "/api/v1/simulation/deposit/create",
+                {
+                    "amount": json.loads(money.to_major_str()),
+                    "global_account_id": "47e42a48-8942-46f1-a7a8-a59e88c523dd",
+                    "payer_bankname": "Deutsche Bank AG",
+                    "payer_name": payer_name,
+                    "reference": reference or f"REF-{evt_id.upper()}",
+                    "status": "SETTLED",
+                },
+            )
+            awx_deposit_id = sim_dep.get("id")
+        except Exception:
+            awx_deposit_id = None
     body = json.dumps(
         {
             "id": evt_id,
@@ -428,7 +524,8 @@ def run_deposit_locked(
         r.token.intent.obligation_id for r in results if r.state is ApprovalState.VALID
     )
     record = {
-        "deposit_id": f"dep-{len(svc.deposit_history) + 1}",
+        "deposit_id": awx_deposit_id or f"dep-{len(svc.deposit_history) + 1}",
+        "awx_deposit_id": awx_deposit_id,
         "event_id": evt_id,
         "account_id": account,
         "currency": currency,
@@ -444,6 +541,7 @@ def run_deposit_locked(
     svc.deposit_history.append(record)
     return {
         "deposit_id": record["deposit_id"],
+        "awx_deposit_id": awx_deposit_id,
         "event_id": evt_id,
         "currency": currency,
         "amount": money.spoken(),
@@ -479,6 +577,35 @@ def build_audit_csv(state: dict) -> str:
             )
         )
     return "\n".join(lines) + "\n"
+
+
+def run_resolve_incident(svc: object) -> dict:
+    from kerdon.approvals import derive_request_id
+    from kerdon.planner import resolve_transfer_incident
+
+    repl_id = f"trn_repl_{len(getattr(svc.transport, 'calls', ())) + 1}"
+    if isinstance(svc.transport, HttpAirwallexTransport) and "airwallex.com" in svc.transport.config.base_url:
+        try:
+            res = svc.transport(
+                "POST",
+                "/api/v1/transfers/create",
+                {
+                    "request_id": derive_request_id(f"replace:{svc.incident.incident_id}:{len(svc.transport.calls)}"),
+                    "currency": svc.incident.amount.currency,
+                    "amount": svc.incident.amount.to_major_str(),
+                    "beneficiary_id": "ce3bbe39-5325-462b-8293-888df6015034",
+                    "metadata": {"obligation_id": svc.incident.obligation_id},
+                },
+            )
+            if res.get("id"):
+                repl_id = str(res["id"])
+        except Exception:
+            pass
+    decision, updated = resolve_transfer_incident(svc.incident, repl_id)
+    svc.incident = updated
+    out = incident_to_dict(svc.incident)
+    out["decision"] = decision.value
+    return out
 
 
 def incident_to_dict(inc: object) -> dict:

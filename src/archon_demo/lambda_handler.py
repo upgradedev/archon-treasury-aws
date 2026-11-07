@@ -266,7 +266,7 @@ def dispatch_http(
                 200,
                 {
                     "verified": True,
-                    "integrations": service.integration_status(),
+                    "integrations": service.integration_status(probe_live=True),
                     "reconciliation": service.reconcile_ledger(),
                 },
                 "application/json",
@@ -426,7 +426,8 @@ def dispatch_http(
             payload = _parse_json_object(raw)
             oid = str(payload.get("obligation_id", "obl-usd-1"))
             mode = str(payload.get("mode", "matching"))
-            custom_text = str(payload["custom_text"]) if payload.get("custom_text") else None
+            raw_custom = payload.get("custom_text") or payload.get("custom_invoice_text")
+            custom_text = str(raw_custom) if raw_custom else None
             out = service.inspect_invoice(oid, mode, custom_text)
             store.persist(session_id)
             return _finish(200, out, "application/json")

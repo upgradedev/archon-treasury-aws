@@ -146,6 +146,36 @@ def main(base: str) -> int:
     other_state = json.loads(body) if status == 200 else {}
     check("second visitor isolated", other_state.get("transfer_count") == 0,
           f"count={other_state.get('transfer_count')}")
+
+    # Production gap routes (active on design/archon-gtm-ui and post-cutover main)
+    ig_status, _h, ig_body = call(base, "GET", "/api/integrations")
+    if ig_status == 200:
+        check("integrations endpoint 200", True, f"HTTP {ig_status}")
+        st_app, _h, app_html = call(base, "GET", "/app")
+        check("react spa route /app 200", st_app == 200 and len(app_html) > 200, f"HTTP {st_app}")
+        st_sess, _h, sess_body = call(base, "GET", "/api/auth/session")
+        check("auth session endpoint 200", st_sess == 200 and "csrf_token" in sess_body, f"HTTP {st_sess}")
+        st_fl, _h, fl_body = call(base, "POST", "/api/reserve-floor", {"currency": "GBP", "reserve_floor": "250.00"})
+        check("dynamic reserve floor update", st_fl == 200 and json.loads(fl_body).get("reserve_floor_cents") == 25000, f"HTTP {st_fl}")
+        st_fxq, _h, fxq_body = call(base, "POST", "/api/fx/quote", {"sell_currency": "USD", "buy_currency": "EUR", "sell_amount": "100.00"})
+        qid = json.loads(fxq_body).get("quote_id") if st_fxq == 200 else None
+        check("standalone fx quote created", st_fxq == 200 and bool(qid), f"HTTP {st_fxq} quote_id={qid}")
+        st_fxc, _h, fxc_body = call(base, "POST", "/api/fx/convert", {"quote_id": qid})
+        check("standalone fx conversion settled", st_fxc == 200 and bool(json.loads(fxc_body).get("conversion_id")), f"HTTP {st_fxc}")
+        st_dep, _h, dep_body = call(base, "POST", "/api/deposits", {"currency": "EUR", "amount": "150.00", "payer_name": "UAT Payer"})
+        check("persistent deposit recorded", st_dep == 200 and bool(json.loads(dep_body).get("deposit_id")), f"HTTP {st_dep}")
+        st_ver, _h, ver_body = call(base, "POST", "/api/integrations/verify", {})
+        check("integrations verify & reconcile", st_ver == 200 and json.loads(ver_body).get("verified") is True, f"HTTP {st_ver}")
+        st_rec, _h, rec_body = call(base, "GET", "/api/reconcile")
+        check("ledger reconciliation ok", st_rec == 200 and json.loads(rec_body).get("execution_integrity_ok") is True, f"HTTP {st_rec}")
+        st_met, _h, met_body = call(base, "GET", "/api/metrics")
+        check("operational telemetry metrics", st_met == 200 and "requests_total" in met_body, f"HTTP {st_met}")
+        st_bak, _h, bak_body = call(base, "GET", "/api/backup")
+        bak_json = json.loads(bak_body) if st_bak == 200 else {}
+        check("checksummed tenant backup export", st_bak == 200 and bool(bak_json.get("sha256_checksum")), f"HTTP {st_bak}")
+        st_res, _h, _rb = call(base, "POST", "/api/restore", bak_json)
+        check("checksummed tenant backup restore", st_res == 200, f"HTTP {st_res}")
+
     print(f"SMOKE {'PASS' if not failures else 'FAIL'} base={base} failed={failures or 'none'}")
     return 1 if failures else 0
 

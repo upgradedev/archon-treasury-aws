@@ -523,13 +523,10 @@ class DemoService:
 
     def resolve_incident(self) -> dict:
         """Kit 3: issue replacement transfer under duplicate lock with fresh request_id."""
+        from archon_demo.operations import run_resolve_incident
+
         with self._lock:
-            repl_id = f"trn_repl_{len(self.transport.calls) + 1}"
-            decision, updated = resolve_transfer_incident(self.incident, repl_id)
-            self.incident = updated
-            out = self._incident_dict()
-            out["decision"] = decision.value
-            return out
+            return run_resolve_incident(self)
 
     def pay_metal_call(self, agent_id: str, memo: str = "x402-tool-call") -> dict:
         with self._lock:
@@ -572,15 +569,15 @@ class DemoService:
 
         return compute_reconciliation(self)
 
-    def integration_status(self) -> dict:
+    def integration_status(self, probe_live: bool = False) -> dict:
         """Return honest, decoupled provider configuration and connection status."""
         with self._lock:
-            return self._integration_status_locked()
+            return self._integration_status_locked(probe_live=probe_live)
 
-    def _integration_status_locked(self) -> dict:
+    def _integration_status_locked(self, probe_live: bool = False) -> dict:
         from archon_demo.operations import compute_integration_status
 
-        return compute_integration_status(self, _BEDROCK_CALLS, _BEDROCK_MAX_CALLS)
+        return compute_integration_status(self, _BEDROCK_CALLS, _BEDROCK_MAX_CALLS, probe_live=probe_live)
 
     def to_persisted_dict(self) -> dict:
         """Serialize full tenant service state for SQLite/AWS persistence across restarts."""
