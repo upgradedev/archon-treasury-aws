@@ -1,17 +1,2 @@
 /** @type {import('tailwindcss').Config} */
-export default {
-  content: ['./index.html', './src/**/*.{ts,tsx}'],
-  theme: {
-    extend: {
-      fontFamily: {
-        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
-      },
-      borderRadius: {
-        sm: '4px',
-        md: '6px',
-      },
-    },
-  },
-  plugins: [],
-};
+export default {content:['./index.html','./src/**/*.{ts,tsx}'],theme:{extend:{colors:{background:'var(--background)',foreground:'var(--foreground)',surface:'var(--surface)','surface-2':'var(--surface-2)',muted:'var(--muted)',border:'var(--border)',primary:'var(--primary)','primary-foreground':'var(--primary-foreground)',overlay:'var(--overlay)'},fontFamily:{sans:['Geist','-apple-system','BlinkMacSystemFont','Segoe UI','Roboto','sans-serif'],mono:['JetBrains Mono','ui-monospace','SFMono-Regular','Menlo','Consolas','monospace']},borderRadius:{sm:'4px',md:'6px'}}},plugins:[]};

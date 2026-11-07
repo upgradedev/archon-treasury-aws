@@ -1,313 +1,98 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CommandMenu } from '../../components/layout/CommandMenu';
-import { Drawer } from '../../components/layout/Drawer';
-import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
+import { Badge } from '../../components/ui/Badge';
 import { useShell } from '../../context/ShellContext';
+import { views } from '../../context/navigation';
 import { CompletenessAlerts } from './CompletenessAlerts';
 import { KpiGrid } from './KpiGrid';
 import { ObligationsTable } from './ObligationsTable';
+import { requestJson } from './api';
 import { TreasurySnapshot } from './types';
-
+const EMPTY: TreasurySnapshot = { balances: [], obligations: [], findings: [] };
+const Details: React.FC<{value: object}> = ({value}) => <dl className="details">{Object.entries(value).map(([key, val]) => <React.Fragment key={key}><dt>{key.replaceAll('_', ' ')}</dt><dd className="money">{val === null ? '—' : String(val)}</dd></React.Fragment>)}</dl>;
+const JsonResult: React.FC<{value: unknown}> = ({value}) => value ? <pre className="data-block">{JSON.stringify(value, null, 2)}</pre> : <p className="empty-state">No result recorded in this session.</p>;
 export const TreasuryDashboard: React.FC = () => {
-  const { activeCompany, activeModule } = useShell();
-  const [snapshot, setSnapshot] = useState<TreasurySnapshot>({
-    balances: [],
-    obligations: [],
-    findings: [],
-  });
-  const [customInvoice, setCustomInvoice] = useState<string>(
-    'INVOICE INV-2026-8841\nSupplier: Shenzhen Precision PCB Ltd.\nCounterparty: supplier-a\nObligation: obl-usd-1\nTotal due USD 450.00',
-  );
-  const [statusMessage, setStatusMessage] = useState<string>(
-    'Ready. Approve USD & EUR payouts, then land a EUR 500.00 deposit to watch selective invalidation.',
-  );
-
-  const fetchSnapshot = useCallback(async () => {
-    const res = await fetch('/api/state');
-    if (res.ok) {
-      const data = (await res.json()) as TreasurySnapshot;
-      setSnapshot(data);
-    }
-  }, []);
-
-  useEffect(() => {
-    void fetchSnapshot();
-  }, [fetchSnapshot]);
-
-  const handleApprove = useCallback(
-    async (obligationId: string) => {
-      const res = await fetch(`/api/approve/${obligationId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setStatusMessage(`Approved ${obligationId} (${String(data.approval_sha256).slice(0, 12)}).`);
-        await fetchSnapshot();
-      }
-    },
-    [fetchSnapshot],
-  );
-
-  const handleExecute = useCallback(
-    async (obligationId: string, approvalSha256: string | null) => {
-      const res = await fetch(`/api/execute/${obligationId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(approvalSha256 ? { approval_sha256: approvalSha256 } : {}),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setStatusMessage(`Executed ${obligationId} (${String(data.transfer_id)}).`);
-      } else {
-        setStatusMessage(String(data.error || 'Refused by Writer gate.'));
-      }
-      await fetchSnapshot();
-    },
-    [fetchSnapshot],
-  );
-
-  const handleSimulateDeposit = useCallback(
-    async (currency: string, amount: string) => {
-      const res = await fetch('/api/simulate-deposit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currency, amount }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        const inv = Array.isArray(data.invalidated) ? data.invalidated.join(', ') : 'none';
-        setStatusMessage(`Landed ${currency} ${amount} deposit. Invalidated: ${inv || 'none'}.`);
-        await fetchSnapshot();
-      }
-    },
-    [fetchSnapshot],
-  );
-
-  const handleVisaIssue = useCallback(async () => {
-    const res = await fetch('/api/visa-issue', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      setStatusMessage(`Issued single-use Virtual Visa *${String(data.card_last4)} locked to MCC ${String(data.allowed_mcc)}.`);
-      await fetchSnapshot();
-    }
-  }, [fetchSnapshot]);
-
-  const handleVisaCharge = useCallback(
-    async (chargeCents: number, mcc: string) => {
-      const res = await fetch('/api/visa-charge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ charge_cents: chargeCents, merchant_mcc: mcc }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setStatusMessage(`${String(data.last_verdict)}: ${String(data.last_reason)}`);
-        await fetchSnapshot();
-      }
-    },
-    [fetchSnapshot],
-  );
-
-  const handleInspectCustomInvoice = useCallback(async () => {
-    const res = await fetch('/api/evaluate-invoice', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        obligation_id: 'obl-usd-1',
-        mode: 'custom',
-        custom_text: customInvoice,
-      }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      setStatusMessage(
-        `Evaluator (${String(data.engine)}, ${String(data.latency_ms)}ms): ${String(data.verdict)} - ${String(data.reason)}`,
-      );
-      await fetchSnapshot();
-    }
-  }, [customInvoice, fetchSnapshot]);
-
-  const showModule = (mod: string) => activeModule === 'all' || activeModule === mod;
-
-  const filteredBalances = useMemo(
-    () =>
-      activeCompany === 'ALL'
-        ? snapshot.balances
-        : snapshot.balances.filter((b) => b.currency === activeCompany),
-    [activeCompany, snapshot.balances],
-  );
-
-  const filteredObligations = useMemo(
-    () =>
-      activeCompany === 'ALL'
-        ? snapshot.obligations
-        : snapshot.obligations.filter((o) => o.currency === activeCompany),
-    [activeCompany, snapshot.obligations],
-  );
-
-  const commandActions = useMemo(
-    () => [
-      {
-        id: 'cmd-eur-deposit',
-        label: 'Land Signed EUR 500.00 Deposit Webhook (Selective Invalidation)',
-        moduleTag: 'Kit 1',
-        run: () => void handleSimulateDeposit('EUR', '500.00'),
-      },
-      {
-        id: 'cmd-usd-deposit',
-        label: 'Land Signed USD 200.00 Deposit (Restore Reserve Floor)',
-        moduleTag: 'Kit 1',
-        run: () => void handleSimulateDeposit('USD', '200.00'),
-      },
-      {
-        id: 'cmd-visa-issue',
-        label: 'Issue Single-Use Virtual Visa Card (*4829) Locked to MCC 5045',
-        moduleTag: 'Kit 9 Visa',
-        run: () => void handleVisaIssue(),
-      },
-      {
-        id: 'cmd-bedrock-custom',
-        label: 'Inspect Custom Supplier Invoice Text via Live Amazon Bedrock',
-        moduleTag: 'Bedrock AI',
-        run: () => void handleInspectCustomInvoice(),
-      },
-    ],
-    [handleInspectCustomInvoice, handleSimulateDeposit, handleVisaIssue],
-  );
-
-  return (
-    <>
-      <div
-        role="status"
-        aria-live="polite"
-        className="px-3.5 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-semibold"
-      >
-        {statusMessage}
-      </div>
-
-      {showModule('payouts') && <KpiGrid balances={filteredBalances} />}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        <div className="lg:col-span-2 space-y-4">
-          {showModule('payouts') && (
-            <Drawer
-              title="Supplier Payouts & Adaptive Triage Plan (72-Hour Window)"
-              subtitle="Tabular-Nums · SHA-256 Bound"
-            >
-              <ObligationsTable
-                obligations={filteredObligations}
-                onApprove={(id) => void handleApprove(id)}
-                onExecute={(id, sha) => void handleExecute(id, sha)}
-              />
-            </Drawer>
-          )}
-
-          {showModule('visa') && snapshot.visa_mandate && (
-            <Drawer
-              title="Kit 9: Visa Virtual Commercial Card & MCC Spend Controls"
-              subtitle="Single-Use Mandate · 150 bps Rebate"
-            >
-              <div className="text-xs space-y-1.5 mb-3">
-                <div>
-                  Card <code className="font-mono">{snapshot.visa_mandate.card_id}</code> (*
-                  {snapshot.visa_mandate.card_last4}) ·{' '}
-                  <strong>{snapshot.visa_mandate.supplier_name}</strong>
-                </div>
-                <div className="font-mono tabular-nums">
-                  Cap: {snapshot.visa_mandate.limit} · Locked MCC:{' '}
-                  {snapshot.visa_mandate.allowed_mcc} · Rebate:{' '}
-                  {snapshot.visa_mandate.rebate_earned}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge intent="indigo">{snapshot.visa_mandate.status}</Badge>
-                  {snapshot.visa_mandate.last_reason && (
-                    <span className="text-slate-600">{snapshot.visa_mandate.last_reason}</span>
-                  )}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="secondary" onClick={() => void handleVisaIssue()}>
-                  1. Issue Single-Use Visa (*4829)
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => void handleVisaCharge(45000, '5812')}
-                >
-                  2. Test Wrong MCC (5812)
-                </Button>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={() => void handleVisaCharge(45000, '5045')}
-                >
-                  3. Authorize Valid PCB Charge (MCC 5045)
-                </Button>
-              </div>
-            </Drawer>
-          )}
-        </div>
-
-        <div className="space-y-4">
-          {showModule('payouts') && (
-            <Drawer title="Simulate Signed Airwallex Deposit" subtitle="HMAC-SHA256">
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => void handleSimulateDeposit('EUR', '500.00')}
-                >
-                  Land EUR 500.00
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void handleSimulateDeposit('USD', '200.00')}
-                >
-                  Land USD 200.00
-                </Button>
-              </div>
-            </Drawer>
-          )}
-
-          {showModule('evaluator') && (
-            <Drawer
-              title="Evaluator Port: Unstructured Invoice Verification"
-              subtitle="Claude Haiku 4.5 (Bedrock)"
-            >
-              <textarea
-                rows={4}
-                value={customInvoice}
-                onChange={(e) => setCustomInvoice(e.target.value)}
-                aria-label="Raw unstructured supplier invoice"
-                className="w-full p-2 text-xs font-mono border border-slate-300 rounded-sm mb-2"
-              />
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => void handleInspectCustomInvoice()}
-              >
-                Inspect Custom Invoice Text (Live Bedrock)
-              </Button>
-            </Drawer>
-          )}
-
-          {showModule('audit') && (
-            <Drawer title="Completeness Findings (21 Rules)" subtitle="Zero-LLM Engine">
-              <CompletenessAlerts findings={snapshot.findings} />
-            </Drawer>
-          )}
-        </div>
-      </div>
-
-      <CommandMenu actions={commandActions} />
-    </>
-  );
+ const { activeCompany, activeModule, setActiveModule } = useShell();
+ const [snapshot, setSnapshot] = useState<TreasurySnapshot>(EMPTY);
+ const [loading, setLoading] = useState(true);
+ const [loadError, setLoadError] = useState('');
+ const [busy, setBusy] = useState(false);
+ const mutationLock = useRef(false);
+ const [status, setStatus] = useState<{text: string; error: boolean} | null>(null);
+ const [search, setSearch] = useState('');
+ const [filter, setFilter] = useState('all');
+ const [customInvoice, setCustomInvoice] = useState('INVOICE INV-2026-8841\nSupplier: Shenzhen Precision PCB Ltd.\nCounterparty: supplier-a\nObligation: obl-usd-1\nTotal due USD 450.00');
+ const [depositCurrency, setDepositCurrency] = useState('EUR');
+ const [depositAmount, setDepositAmount] = useState('500.00');
+ const [chargeCents, setChargeCents] = useState('45000');
+ const [mcc, setMcc] = useState('5045');
+ const [failureType, setFailureType] = useState('bank_return');
+ const [agentId, setAgentId] = useState('');
+ const [newPrice, setNewPrice] = useState('0.10');
+ const [maxPrice, setMaxPrice] = useState('20');
+ const [confirmAction, setConfirmAction] = useState<{name: string; path: string; body: Record<string, unknown>} | null>(null);
+ const [lastDeposit, setLastDeposit] = useState<unknown>(null);
+ const fetchSnapshot = useCallback(async () => {
+   try { const data = await requestJson<TreasurySnapshot>('/api/state');
+     if (!Array.isArray(data.balances) || !Array.isArray(data.obligations) || !Array.isArray(data.findings)) throw new Error('The service returned incomplete treasury data.');
+     setSnapshot(data); setLoadError(''); return data;
+   } catch (e) { const message = e instanceof Error ? e.message : 'Unable to load treasury state.'; setLoadError(message); throw e; }
+ }, []);
+ useEffect(() => { void fetchSnapshot().catch(() => undefined).finally(() => setLoading(false)); }, [fetchSnapshot]);
+ useEffect(() => {const label = views.find(v => v.id === activeModule)?.label ?? 'Command Center';document.title = `Archon Treasury — ${label}`;}, [activeModule]);
+ const perform = useCallback(async (name: string, path: string, body: Record<string, unknown>) => {
+   if (mutationLock.current) return;
+   mutationLock.current = true; setBusy(true); setStatus(null);
+   let succeeded = false;
+   try {
+     const result = await requestJson<Record<string, unknown>>(path, body); succeeded = true;
+     const detail = result.error ?? result.last_reason ?? result.reason ?? result.transfer_id ?? result.approval_sha256 ?? result.state ?? result.verdict ?? '';
+     setStatus({text: `${name}: ${detail ? String(detail) : 'Request accepted by service.'}`, error: false});
+     if (path === '/api/simulate-deposit') setLastDeposit(result);
+     if (path === '/api/reset') setLastDeposit(null);
+   } catch (e) { setStatus({text: e instanceof Error ? e.message : 'Service request failed.', error: true}); }
+   finally {
+     try { await fetchSnapshot(); } catch { if (succeeded) setStatus({text: 'The action was accepted, but refreshed state could not be loaded. Refresh before taking another action.', error: true}); }
+     mutationLock.current = false; setBusy(false);
+   }
+ }, [fetchSnapshot]);
+ const requestAction = (name: string, path: string, body: Record<string, unknown> = {}) => setConfirmAction({name, path, body});
+ const balances = useMemo(() => activeCompany === 'ALL' ? snapshot.balances : snapshot.balances.filter(b => b.currency === activeCompany), [activeCompany, snapshot.balances]);
+ const obligations = useMemo(() => snapshot.obligations.filter(o => (activeCompany === 'ALL' || o.currency === activeCompany) && `${o.supplier_name} ${o.invoice_ref} ${o.obligation_id}`.toLowerCase().includes(search.toLowerCase()) && (activeModule !== 'approvals' || o.approval_state !== 'PAID') && (filter === 'all' || o.approval_state === filter)), [snapshot.obligations, activeCompany, search, activeModule, filter]);
+ const invalidated = snapshot.obligations.filter(o => o.approval_state === 'INVALIDATED');
+ const blockers = snapshot.findings.filter(f => f.severity === 'BLOCKER');
+ const selectedAgent = agentId || snapshot.metal_agents?.[0]?.agent_id || '';
+ const unavailable = loading || busy || !!loadError;
+ const actions = views.map<{id: string; label: string; moduleTag: string; run: () => void}>(v => ({id: `view-${v.id}`, label: v.label, moduleTag: v.group, run: () => setActiveModule(v.id)})).concat([
+   {id: 'deposit-eur', label: 'Simulate EUR 500.00 deposit', moduleTag: 'Demo', run: () => requestAction('Simulate EUR 500.00 deposit', '/api/simulate-deposit', {currency: 'EUR', amount: '500.00'})},
+   {id: 'deposit-usd', label: 'Simulate USD 200.00 deposit', moduleTag: 'Demo', run: () => requestAction('Simulate USD 200.00 deposit', '/api/simulate-deposit', {currency: 'USD', amount: '200.00'})},
+   {id: 'issue-visa', label: 'Issue single-use virtual card', moduleTag: 'Cards', run: () => requestAction('Issue virtual card', '/api/visa-issue')},
+ ]);
+ const payoutTable = <><div className="section-heading"><h2>{activeModule === 'approvals' ? 'Approval queue' : 'Supplier payouts'}</h2><div className="toolbar"><input aria-label="Search payouts" type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Supplier or invoice"/><select aria-label="Payout status" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">All statuses</option><option value="NOT_APPROVED">Needs approval</option><option value="INVALIDATED">Evidence changed</option><option value="VALID">Ready to execute</option><option value="PAID">Paid</option></select></div></div><ObligationsTable obligations={obligations} busy={unavailable} onApprove={id => requestAction(`Approve ${id}`, `/api/approve/${encodeURIComponent(id)}`)} onExecute={(id, sha) => requestAction(`Execute ${id}`, `/api/execute/${encodeURIComponent(id)}`, sha ? {approval_sha256: sha} : {})}/></>;
+ const label = views.find(v => v.id === activeModule)?.label ?? 'Command Center';
+ const subtitles: Record<string, string> = {all: `${snapshot.obligations.filter(o => o.approval_state !== 'PAID').length} open payouts · ${invalidated.length} changed approvals · ${blockers.length} blockers`, payouts:'Supplier obligations and execution gates', approvals:'Evidence-bound approval decisions', deposits:'Deposit simulation and selective invalidation', wallets:'Balances, protected reserves and spendable funds', fx:'Reference exchange rates and conversion requirements', audit:'Current completeness findings', receipts:'Service-issued receipts and audit export', incidents:'Payment failure and recovery', visa:'Single-use cards and merchant restrictions', metal:'Agent budgets and spending mandates', evaluator:'Invoice evidence inspection', integrations:'Current service configuration'};
+ return <>
+  <div className="page-heading"><div><span className="eyebrow">Vance Hardware / Treasury</span><h1 className="display">{label}</h1><p>{subtitles[activeModule]}</p></div><div className="toolbar"><span className="demo-badge">◇ {snapshot.mode ?? 'Mode unverified'}</span><Button disabled={loading || busy} onClick={() => { setLoading(true); void fetchSnapshot().catch(() => undefined).finally(() => setLoading(false)); }}>↻ Refresh</Button></div></div>
+  {loading && <p role="status" className="status-bar">Loading treasury state…</p>}
+  {loadError && <p role="alert" className="status-bar error">{loadError}</p>}
+  {status && <p role={status.error ? 'alert' : 'status'} aria-live="polite" className={`status-bar ${status.error ? 'error' : 'success'}`}>{status.text}</p>}
+  {busy && <p role="status" className="status-bar">Waiting for service confirmation…</p>}
+  {!loading && !loadError && <>
+  {activeModule === 'all' && <div className="workspace-grid"><div className="workspace-main"><KpiGrid balances={balances}/><section>{payoutTable}</section></div><aside className="workspace-side"><section className="callout"><h3>{invalidated.length ? 'Evidence changed' : 'Approval integrity'}</h3>{invalidated.length ? invalidated.map(o => <div key={o.obligation_id}><p>{o.supplier_name}<br/>{o.action_reason}</p><Button onClick={() => {setActiveModule('approvals');setSearch(o.obligation_id);}}>Review approval →</Button></div>) : <p>No invalidated approvals in the current state.</p>}</section><section><div className="section-heading"><h2>Completeness</h2><Badge intent={blockers.length ? 'critical' : 'success'}>{blockers.length} blockers</Badge></div><CompletenessAlerts findings={snapshot.findings.slice(0, 3)}/><Button variant="ghost" onClick={() => setActiveModule('audit')}>All findings →</Button></section>{snapshot.forecast && <section><div className="section-heading"><h2>Forecast confidence</h2><span className="money">{snapshot.forecast.confidence_pct}%</span></div><p className="muted">{snapshot.forecast.reason}</p><span className="money">Limit {snapshot.forecast.autonomous_limit_major}</span></section>}</aside></div>}
+  {(activeModule === 'payouts' || activeModule === 'approvals') && <section>{payoutTable}</section>}
+  {activeModule === 'wallets' && <><KpiGrid balances={balances}/><div className="list-row"><p className="muted">Reserve-floor updates are not available from the current service.</p><Button disabled>Change reserve floor</Button></div></>}
+  {activeModule === 'deposits' && <div className="detail-grid"><section><div className="section-heading"><h2>Simulate a signed deposit</h2><Badge intent="warning">Demo action</Badge></div><div className="toolbar"><select aria-label="Deposit currency" value={depositCurrency} onChange={e => setDepositCurrency(e.target.value)}>{['EUR','USD','GBP'].map(c => <option key={c}>{c}</option>)}</select><input type="number" min="0.01" step="0.01" aria-label="Deposit amount" value={depositAmount} onChange={e => setDepositAmount(e.target.value)}/><Button variant="primary" disabled={unavailable || !(Number(depositAmount) > 0)} onClick={() => requestAction(`Simulate ${depositCurrency} ${depositAmount} deposit`, '/api/simulate-deposit', {currency: depositCurrency, amount: depositAmount})}>Simulate deposit</Button></div><div className="list-row"><Button disabled={unavailable} onClick={() => requestAction('Simulate EUR 500.00 deposit', '/api/simulate-deposit', {currency:'EUR',amount:'500.00'})}>EUR 500.00</Button><Button disabled={unavailable} onClick={() => requestAction('Simulate USD 200.00 deposit', '/api/simulate-deposit', {currency:'USD',amount:'200.00'})}>USD 200.00</Button></div><p className="muted">A persistent deposit ledger is not available from this service.</p></section><section><h2>Last deposit response</h2><JsonResult value={lastDeposit}/></section></div>}
+  {activeModule === 'fx' && <><section><div className="section-heading"><h2>Reference rates</h2><span className="muted">{snapshot.fx_rates?.source} · {snapshot.fx_rates?.as_of_date}</span></div>{snapshot.fx_rates ? <div className="metric-grid">{[['EUR / USD',snapshot.fx_rates.eur_usd],['EUR / GBP',snapshot.fx_rates.eur_gbp],['GBP / USD',snapshot.fx_rates.gbp_usd]].map(([pair,rate]) => <article key={pair} className="metric"><span className="eyebrow">{pair}</span><div className="money value">{rate}</div></article>)}</div> : <p className="empty-state">Rates unavailable.</p>}</section><section className="list-row"><h2>Conversion requirements</h2>{snapshot.obligations.filter(o => o.plan_action === 'CONVERT_FX').map(o => <div key={o.obligation_id}><strong>{o.supplier_name}</strong><p className="muted">{o.plan_rationale}</p><Button onClick={() => {setActiveModule('payouts');setSearch(o.obligation_id);}}>Review payout →</Button></div>)}<p className="muted">Standalone FX quotes and conversions are not exposed by this service.</p></section></>}
+  {activeModule === 'audit' && <CompletenessAlerts findings={snapshot.findings}/>}
+  {activeModule === 'receipts' && <><div className="section-heading"><h2>Sealed payout receipts</h2><a className="audit-link" href="/api/audit-export.csv" download>↓ Download audit CSV</a></div>{snapshot.obligations.some(o => o.receipt) ? snapshot.obligations.filter(o => o.receipt).map(o => <section key={o.obligation_id} className="list-row"><h3>{o.supplier_name} · {o.invoice_ref}</h3><JsonResult value={o.receipt}/></section>) : <p className="empty-state">No payout receipts yet.</p>}</>}
+  {activeModule === 'incidents' && <>{snapshot.incident ? <Details value={snapshot.incident}/> : <p className="empty-state">No incident data.</p>}<div className="list-row"><Badge intent="warning">Demo failure injection</Badge><div className="toolbar"><select aria-label="Incident failure type" value={failureType} onChange={e => setFailureType(e.target.value)}><option value="bank_return">Bank return</option><option value="timeout">Timeout</option></select><Button disabled={unavailable} onClick={() => requestAction('Simulate payment failure','/api/incident-fail',{failure_type:failureType})}>Simulate failure</Button><Button variant="primary" disabled={unavailable} onClick={() => requestAction('Resolve payment incident','/api/incident-resolve')}>Resolve incident</Button></div></div></>}
+  {activeModule === 'visa' && <>{snapshot.visa_mandate ? <div className="detail-grid"><section><div className="card-visual"><div className="section-heading"><span className="display">Archon</span><span>VISA</span></div><div className="money">•••• •••• •••• {snapshot.visa_mandate.card_last4}</div><span>{snapshot.visa_mandate.supplier_name}</span></div><Details value={snapshot.visa_mandate}/></section><section><h2>Card controls</h2><div className="toolbar"><Button disabled={unavailable} onClick={() => requestAction('Issue virtual card','/api/visa-issue')}>Issue single-use card</Button></div><h3>Simulate authorization</h3><label>Amount in cents<input type="number" min="1" step="1" aria-label="Card charge cents" value={chargeCents} onChange={e => setChargeCents(e.target.value)}/></label><label>Merchant category<input aria-label="Merchant MCC" value={mcc} onChange={e => setMcc(e.target.value)}/></label><div className="toolbar"><Button variant="primary" disabled={unavailable || !Number.isInteger(Number(chargeCents)) || Number(chargeCents)<=0} onClick={() => requestAction('Simulate card authorization','/api/visa-charge',{charge_cents:Number(chargeCents),merchant_mcc:mcc})}>Test authorization</Button><Button disabled={unavailable} onClick={() => requestAction('Test wrong MCC 5812','/api/visa-charge',{charge_cents:45000,merchant_mcc:'5812'})}>Test wrong MCC</Button></div></section></div> : <p className="empty-state">Card mandate unavailable.</p>}</>}
+  {activeModule === 'metal' && <><div className="metric-grid">{snapshot.metal_agents?.map(agent => <article key={agent.agent_id} className="metric"><h3>{agent.agent_id}</h3><Details value={agent}/><Button disabled={unavailable} onClick={() => requestAction(`Pay agent call: ${agent.agent_id}`,`/api/metal-call/${encodeURIComponent(agent.agent_id)}`)}>Pay one call</Button></article>)}</div><section className="list-row"><Badge intent="warning">Simulated Metal adapter</Badge><div className="toolbar"><select aria-label="Spending agent" value={selectedAgent} onChange={e => setAgentId(e.target.value)}>{snapshot.metal_agents?.map(a => <option key={a.agent_id}>{a.agent_id}</option>)}</select><input aria-label="Agent new price" type="number" min="0.01" step="0.01" value={newPrice} onChange={e => setNewPrice(e.target.value)}/><Button disabled={unavailable || !selectedAgent || !(Number(newPrice)>0)} onClick={() => requestAction('Rebalance agent pricing','/api/metal-rebalance',{agent_id:selectedAgent,new_price:newPrice})}>Rebalance</Button><input aria-label="Agent maximum price cents" type="number" min="1" step="1" value={maxPrice} onChange={e => setMaxPrice(e.target.value)}/><Button disabled={unavailable || !selectedAgent || !Number.isInteger(Number(maxPrice)) || Number(maxPrice)<=0} onClick={() => requestAction('Replace agent mandate','/api/metal-mandate',{agent_id:selectedAgent,new_max_price_cents:Number(maxPrice)})}>Replace mandate</Button><Button disabled={unavailable} onClick={() => requestAction('Resolve agent dispute','/api/metal-dispute')}>Resolve dispute</Button></div><JsonResult value={snapshot.last_dispute_report}/></section></>}
+  {activeModule === 'evaluator' && <div className="detail-grid"><section><h2>Invoice evidence</h2><textarea rows={9} aria-label="Raw unstructured supplier invoice" value={customInvoice} onChange={e => setCustomInvoice(e.target.value)}/><div className="toolbar"><Button variant="primary" disabled={unavailable || !customInvoice.trim()} onClick={() => requestAction('Inspect custom invoice','/api/evaluate-invoice',{obligation_id:'obl-usd-1',mode:'custom',custom_text:customInvoice})}>Inspect invoice</Button><Button disabled={unavailable} onClick={() => requestAction('Inspect matching invoice','/api/evaluate-invoice',{obligation_id:'obl-usd-1',mode:'matching'})}>Matching invoice</Button><Button disabled={unavailable} onClick={() => requestAction('Inspect mismatched invoice','/api/evaluate-invoice',{obligation_id:'obl-usd-1',mode:'mismatched'})}>Mismatched invoice</Button></div></section><section><h2>Latest inspection</h2><JsonResult value={snapshot.last_ai_inspection}/><h3>Forecast evidence</h3><div className="toolbar"><Button disabled={unavailable} onClick={() => requestAction('Simulate contradicting customer email','/api/customer-email',{contradicts:true})}>Simulate contradiction</Button><Button disabled={unavailable} onClick={() => requestAction('Simulate confirming customer email','/api/customer-email',{contradicts:false})}>Simulate confirmation</Button></div></section></div>}
+  {activeModule === 'integrations' && <><div className="list-row"><h2>Airwallex</h2><span className="money">{snapshot.mode ?? 'Unverified'}</span><p className="muted">Provider credentials and live payment readiness have not been verified.</p><Button disabled>Configure connection</Button></div><div className="list-row"><h2>Metal</h2><Badge intent="warning">Simulated adapter</Badge></div><div className="list-row"><h2>Invoice evaluator</h2><JsonResult value={snapshot.last_ai_inspection}/></div><div className="list-row"><h2>Session data</h2><p className="muted">Synthetic scenario. State is kept in memory and may reset after a cold start.</p><Button disabled={unavailable} onClick={() => requestAction('Reset synthetic session','/api/reset')}>Reset demo session</Button></div></>}
+  </>}
+  {confirmAction && <div className="fixed inset-0 z-50 bg-overlay flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Confirm action"><div className="bg-surface border border-border rounded-md p-6 max-w-lg w-full"><h2 className="text-lg font-medium">{confirmAction.name}</h2><p className="muted my-4">The current service will validate this request before applying it.</p><div className="toolbar"><Button onClick={() => setConfirmAction(null)}>Cancel</Button><Button variant="primary" disabled={unavailable} onClick={() => {const a=confirmAction;setConfirmAction(null);void perform(a.name,a.path,a.body);}}>Confirm</Button></div></div></div>}
+  <CommandMenu actions={actions}/>
+ </>;
 };
