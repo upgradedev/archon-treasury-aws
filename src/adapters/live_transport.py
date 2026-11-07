@@ -126,7 +126,14 @@ class HttpAirwallexTransport:
         token = self._authenticate()
         wire_payload = self._prepare_payload(path, payload)
         self.calls.append((method, path, wire_payload))
-        out = self._raw(method, path, wire_payload, {"Authorization": f"Bearer {token}"})
+        try:
+            out = self._raw(method, path, wire_payload, {"Authorization": f"Bearer {token}"})
+        except AdapterError as exc:
+            if path == "/api/v1/transfers/create" and isinstance(wire_payload, dict) and "fee_unknown" in str(exc):
+                retry_payload = {**wire_payload, "request_id": str(uuid.uuid4())}
+                out = self._raw(method, path, retry_payload, {"Authorization": f"Bearer {token}"})
+            else:
+                raise
         if path == "/api/v1/transfers/create" and out.get("id"):
             self.transfer_count += 1
         return out
